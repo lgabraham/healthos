@@ -1,5 +1,7 @@
 # HealthOS
 
+[![HealthOS CI](https://github.com/lgabraham/sandbox/actions/workflows/healthos-ci.yml/badge.svg)](https://github.com/lgabraham/sandbox/actions/workflows/healthos-ci.yml)
+
 A personal health-data aggregator. It pulls **Whoop**, **Garmin**, and **Eight
 Sleep** into one Postgres database, serves a dark, data-dense dashboard, runs a
 nightly sync + behavioral inference, and exposes an **MCP server** so Claude can
