@@ -39,10 +39,9 @@ class WhoopAuthError(RuntimeError):
 class WhoopClient:
     """Thin Whoop API client with automatic access-token refresh.
 
-    Tokens are read from settings on construction. After a refresh the new
-    tokens are kept in memory; persisting them back to the secret store is the
-    caller's job (see ``tokens`` property) since where secrets live differs
-    between local .env and Railway env vars.
+    Pass ``persist=True`` (the default for ``from_store``) to write refreshed
+    tokens back to the DB token store so rotation is transparent and onboarding
+    never requires copy-pasting secrets.
     """
 
     def __init__(
@@ -51,12 +50,23 @@ class WhoopClient:
         refresh_token: str | None = None,
         client_id: str | None = None,
         client_secret: str | None = None,
+        persist: bool = False,
     ) -> None:
         self.access_token = access_token or settings.whoop_access_token
         self.refresh_token = refresh_token or settings.whoop_refresh_token
         self.client_id = client_id or settings.whoop_client_id
         self.client_secret = client_secret or settings.whoop_client_secret
+        self.persist = persist
         self._client = httpx.Client(base_url=API_BASE, timeout=30.0)
+
+    @classmethod
+    def from_store(cls) -> WhoopClient:
+        """Build a client using DB-stored tokens (env fallback), persisting
+        any refreshed tokens back to the store."""
+        from ..tokenstore import load
+
+        access, refresh = load("whoop")
+        return cls(access_token=access, refresh_token=refresh, persist=True)
 
     # -- auth --------------------------------------------------------------
     @property
@@ -85,6 +95,10 @@ class WhoopClient:
         self.access_token = payload["access_token"]
         # Whoop rotates refresh tokens; keep the latest if present.
         self.refresh_token = payload.get("refresh_token", self.refresh_token)
+        if self.persist:
+            from ..tokenstore import save
+
+            save("whoop", self.access_token, self.refresh_token)
         log.info("Refreshed Whoop access token.")
 
     def _auth_headers(self) -> dict[str, str]:
@@ -314,7 +328,7 @@ def pull(start_date: _date, end_date: _date, client: WhoopClient | None = None) 
     missed, then re-filtered by local date during normalization.
     """
     own = client is None
-    client = client or WhoopClient()
+    client = client or WhoopClient.from_store()
     start = datetime.combine(start_date - timedelta(days=1), time.min, tzinfo=settings.tz)
     end = datetime.combine(end_date + timedelta(days=1), time.max, tzinfo=settings.tz)
     try:

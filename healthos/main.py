@@ -52,6 +52,27 @@ def health() -> dict:
     return {"status": "ok", "version": __version__}
 
 
+def _mount_frontend() -> None:
+    """Serve the built dashboard from the same service when present.
+
+    Lets a single Railway deploy host both the API and the SPA (one URL — handy
+    on mobile). No-op in dev, where Vite serves the frontend and proxies the API.
+    """
+    from pathlib import Path
+
+    from fastapi.staticfiles import StaticFiles
+
+    dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+    if dist.is_dir():
+        # API routers are registered first, so they take precedence over this
+        # catch-all; html=True serves index.html at the root.
+        app.mount("/", StaticFiles(directory=str(dist), html=True), name="frontend")
+        log.info("Serving frontend from %s", dist)
+
+
+_mount_frontend()
+
+
 def main() -> None:
     import uvicorn
 

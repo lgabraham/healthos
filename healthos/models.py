@@ -117,3 +117,21 @@ class SyncLog(Base):
     records_written: Mapped[int | None] = mapped_column(BigInteger)
     error_message: Mapped[str | None] = mapped_column(Text)
     synced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class OAuthToken(Base):
+    """Persisted OAuth tokens, keyed by provider.
+
+    Lets the Whoop consent flow store tokens straight to the DB (and refresh
+    them in place) so onboarding needs no manual copy-paste of secrets — the
+    whole flow works from a phone against the deployed callback URL.
+    """
+
+    __tablename__ = "oauth_tokens"
+
+    provider: Mapped[str] = mapped_column(String(50), primary_key=True)  # 'whoop'
+    access_token: Mapped[str | None] = mapped_column(Text)
+    refresh_token: Mapped[str | None] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

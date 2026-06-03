@@ -54,10 +54,10 @@ uv venv && source .venv/bin/activate
 uv pip install -e .             # add `.[eightsleep]` to enable Eight Sleep
 alembic upgrade head            # create the schema
 
-# First-time Whoop auth (CLI prints a consent URL; visit it, approve,
-# then copy the tokens from the callback page into .env)
-healthos whoop-auth
-uvicorn healthos.main:app --reload   # callback lands at /auth/whoop/callback
+# First-time Whoop auth — start the API, then open /auth/whoop in a browser,
+# approve, and the callback saves tokens to the DB automatically (no copy-paste,
+# works from a phone against the deployed URL).
+uvicorn healthos.main:app --reload   # then visit http://localhost:8000/auth/whoop
 
 # Pull data
 python -m scripts.backfill --days 90   # historical backfill (rate-limit friendly)
@@ -139,9 +139,11 @@ workout), **Trends** (30/60/90-day toggle with 7-day rolling averages and event
 markers), and **Correlations** (scatter + r + sample size + plain-language read).
 Dark `#0a0a0a`, amber `#f59e0b` accent, IBM Plex Mono for values.
 
-Build for production with `pnpm build` (outputs `frontend/dist/`), deploy to
-Vercel, or serve the static bundle behind any host. Point it at the API with
-`VITE_API_BASE` if the API lives on a different origin.
+Build for production with `pnpm build` (outputs `frontend/dist/`). Two options:
+deploy the bundle to Vercel and point it at the API via `VITE_API_BASE`, **or**
+build it and let the FastAPI app serve it from the same origin — if
+`frontend/dist/` exists, it's mounted at `/`, so a single Railway service hosts
+both the dashboard and the API at one URL (convenient on mobile).
 
 ## Deploy (Railway)
 
@@ -166,5 +168,8 @@ ruff check healthos scripts tests
 - **Whoop pagination** — backfill follows `next_token` to completion.
 - **Eight Sleep token expiry** — the client rebuilds an authed session per pull
   and skips individual bad nights rather than aborting.
-- **Secrets** live only in env vars / `.env` (gitignored). Whoop tokens rotate
-  on refresh; re-paste them after the first OAuth if you persist them manually.
+- **Secrets**: Garmin and Eight Sleep are just email/password env vars — set
+  them anywhere, including the Railway dashboard on a phone. Whoop is a one-time
+  OAuth (register the dev app at developer.whoop.com — easiest on desktop), but
+  the consent/callback step persists + refreshes tokens in the DB automatically,
+  so there's nothing to copy-paste and it works from mobile too.
