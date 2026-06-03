@@ -173,9 +173,13 @@ both the dashboard and the API at one URL (convenient on mobile).
 
 ## Deploy (Railway)
 
-`railway.json` runs `alembic upgrade head` then boots uvicorn. Provision a
-Postgres plugin, set the env vars from `.env.example`, and the embedded
-scheduler handles nightly syncs — no separate worker needed.
+The `Dockerfile` builds the dashboard and serves it alongside the API as a
+single service; on deploy it runs `alembic upgrade head` then boots uvicorn +
+the embedded nightly scheduler — no separate worker or cron. Provision a
+Postgres plugin, set the env vars from `.env.example`, generate a domain, and
+authorize Whoop once at `/auth/whoop`.
+
+Full click-by-click walkthrough: **[DEPLOY.md](DEPLOY.md)**.
 
 ## Tests
 
