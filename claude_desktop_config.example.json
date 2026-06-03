@@ -1,0 +1,14 @@
+{
+  "//": "Add this to ~/Library/Application Support/Claude/claude_desktop_config.json (macOS) or %APPDATA%/Claude/claude_desktop_config.json (Windows). Point 'cwd' at your HealthOS checkout and set DATABASE_URL to the same Postgres the app uses.",
+  "mcpServers": {
+    "healthos": {
+      "command": "uv",
+      "args": ["run", "python", "-m", "healthos.mcp_server"],
+      "cwd": "/absolute/path/to/healthos",
+      "env": {
+        "DATABASE_URL": "postgresql+psycopg://healthos:healthos@localhost:5432/healthos",
+        "TIMEZONE": "America/Los_Angeles"
+      }
+    }
+  }
+}

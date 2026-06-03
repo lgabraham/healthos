@@ -1,0 +1,47 @@
+[project]
+name = "healthos"
+version = "0.1.0"
+description = "Personal health data aggregator: Whoop + Garmin + Eight Sleep -> Postgres, dashboard, and MCP server."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy>=2.0",
+    "psycopg[binary]>=3.1",
+    "alembic>=1.13",
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "apscheduler>=3.10",
+    "httpx>=0.27",
+    "python-dateutil>=2.9",
+    "garth>=0.4.46",
+    "mcp>=1.2.0",
+]
+
+[project.optional-dependencies]
+# Eight Sleep has no stable PyPI package name across forks; pin the community client here.
+eightsleep = [
+    "pyeight>=0.3.2",
+]
+dev = [
+    "pytest>=8.2",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+healthos = "healthos.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["healthos"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
