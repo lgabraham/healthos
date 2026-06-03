@@ -2,6 +2,7 @@
 
     healthos init-db                 create tables (dev shortcut; prefer alembic)
     healthos whoop-auth              print the Whoop OAuth URL for first auth
+    healthos doctor                  check which providers are connected
     healthos sync [--days N]         sync recent days for all sources
     healthos backfill [--days 90]    historical backfill (rate-limit friendly)
     healthos infer --start --end     re-run behavioral inference over a range
@@ -63,6 +64,17 @@ def _cmd_infer(args: argparse.Namespace) -> None:
     print(f"Inferred {total} events.")
 
 
+def _cmd_doctor(_args: argparse.Namespace) -> None:
+    from .authcheck import ProviderStatus, check_all
+
+    print("HealthOS auth check:\n")
+    rows = check_all()
+    for r in rows:
+        status = ProviderStatus(**r)
+        print(f"  {status.symbol} {status.provider:12s} {status.detail}")
+    print("\n  ✓ connected   ✗ configured but failing   ○ not set up yet")
+
+
 def _cmd_summary(args: argparse.Namespace) -> None:
     from .database import get_session
     from .queries import canonical_value, rolling_baseline
@@ -84,6 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("init-db").set_defaults(func=_cmd_init_db)
     sub.add_parser("whoop-auth").set_defaults(func=_cmd_whoop_auth)
+    sub.add_parser("doctor").set_defaults(func=_cmd_doctor)
 
     s = sub.add_parser("sync")
     s.add_argument("--days", type=int, default=1)

@@ -132,6 +132,10 @@ class WhoopClient:
         return records
 
     # -- endpoints ---------------------------------------------------------
+    def profile(self) -> dict:
+        """Basic user profile — a cheap call used by the auth self-check."""
+        return self._get("/v1/user/profile/basic")
+
     def recovery(self, start: datetime, end: datetime) -> list[dict]:
         return self._paginate("/v1/recovery", start, end)
 

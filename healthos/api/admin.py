@@ -33,6 +33,15 @@ def trigger_sync(
     return {"ok": True, "queued": "daily_sync (yesterday)"}
 
 
+@router.get("/auth-status")
+def auth_status() -> dict:
+    """Per-provider auth check (no secrets returned). Makes live calls, so it
+    may take a few seconds."""
+    from ..authcheck import check_all
+
+    return {"providers": check_all()}
+
+
 @router.post("/reinfer")
 def reinfer(
     background: BackgroundTasks,

@@ -75,6 +75,32 @@ curl -X POST "localhost:8000/api/admin/sync"                       # yesterday, 
 curl -X POST "localhost:8000/api/admin/sync?start=2026-05-01&end=2026-05-07&source=whoop"
 ```
 
+## Connecting your accounts (auth)
+
+Put credentials in `.env` (local) or Railway env vars — **never** anywhere
+public. Then run `healthos doctor` (or `GET /api/admin/auth-status`) to see what's
+connected; it makes a live call per provider and never prints secrets:
+
+```
+HealthOS auth check:
+
+  ○ whoop        Set WHOOP_CLIENT_ID/SECRET, then authorize at /auth/whoop.
+  ○ garmin       Set GARMIN_EMAIL and GARMIN_PASSWORD.
+  ○ eight_sleep  Set EIGHT_SLEEP_EMAIL and EIGHT_SLEEP_PASSWORD.
+
+  ✓ connected   ✗ configured but failing   ○ not set up yet
+```
+
+- **Garmin** — set `GARMIN_EMAIL` + `GARMIN_PASSWORD`. That's it (can be done
+  from a phone via the Railway dashboard).
+- **Eight Sleep** — set `EIGHT_SLEEP_EMAIL` + `EIGHT_SLEEP_PASSWORD`, and install
+  the optional client (`uv pip install '.[eightsleep]'`).
+- **Whoop** — register an app at [developer.whoop.com](https://developer.whoop.com)
+  (easiest on desktop), set its redirect URI to `…/auth/whoop/callback`, and put
+  `WHOOP_CLIENT_ID` + `WHOOP_CLIENT_SECRET` in env. Then open `/auth/whoop` in any
+  browser and approve — tokens are saved to the DB automatically (nothing to
+  copy-paste; works from mobile). Re-run `healthos doctor` to confirm a `✓`.
+
 ## Canonical sources
 
 When multiple devices report the same metric, all are stored but exactly one is
