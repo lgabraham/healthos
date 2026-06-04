@@ -133,6 +133,25 @@ shows a "building baseline" banner during this period. Replay historical
 inference without re-syncing via `POST /api/admin/reinfer?start=…&end=…` or
 `healthos infer --start … --end …`.
 
+## Curating events
+
+Inference produces low-confidence guesses; you curate them via `/api/events`:
+
+```bash
+# Log an event no device can infer (travel, calendar_heavy_day, ...)
+curl -X POST "$HEALTHOS_URL/api/events" \
+  -d '{"date":"2026-06-03","event_type":"travel","value":1,"notes":"SFO->JFK"}'
+
+# Confirm an inferred guess (e.g. upgrade a sauna night to 'confirmed')
+curl -X POST "$HEALTHOS_URL/api/events/sauna/confirm" -d '{"date":"2026-06-03"}'
+
+# Dismiss a false positive
+curl -X DELETE "$HEALTHOS_URL/api/events/alcohol_detected?date=2026-06-03"
+```
+
+Confirming sets `confidence='confirmed'` (creating the event if it didn't exist),
+manual logging sets `confidence='manual'`, and dismissing removes the row.
+
 ## iOS Shortcuts webhook
 
 ```bash
