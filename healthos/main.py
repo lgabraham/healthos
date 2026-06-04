@@ -22,13 +22,16 @@ log = logging.getLogger("healthos")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    scheduler = start_scheduler()
+    if settings.enable_scheduler:
+        start_scheduler()
+    else:
+        log.info("In-process scheduler disabled (ENABLE_SCHEDULER=false); expecting external cron.")
     log.info("HealthOS %s started", __version__)
     try:
         yield
     finally:
-        shutdown_scheduler()
-        del scheduler
+        if settings.enable_scheduler:
+            shutdown_scheduler()
 
 
 app = FastAPI(title="HealthOS", version=__version__, lifespan=lifespan)

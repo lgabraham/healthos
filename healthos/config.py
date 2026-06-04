@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     sync_hour: int = Field(default=6, alias="SYNC_HOUR")
     port: int = Field(default=8000, alias="PORT")
     cors_origins: str = Field(default="http://localhost:5173", alias="CORS_ORIGINS")
+    # Run the in-process nightly scheduler. Set false when an external cron owns
+    # the schedule (e.g. an always-on host running `healthos sync`), so the two
+    # don't double-sync — which matters for Garmin's rate limits.
+    enable_scheduler: bool = Field(default=True, alias="ENABLE_SCHEDULER")
 
     @property
     def tz(self) -> ZoneInfo:

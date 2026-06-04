@@ -100,3 +100,66 @@ docker run --rm -p 8000:8000 \
   healthos
 # -> dashboard at http://localhost:8000, API under /api, health at /health
 ```
+
+---
+
+# Self-hosting on an always-on machine
+
+If you have an always-on box (home server / Pi / NAS), you can run the whole
+stack there instead of Railway. Two scheduling styles — pick one.
+
+## One-time setup
+
+```bash
+git clone <your repo> && cd sandbox/healthos
+uv venv && source .venv/bin/activate
+uv pip install -e ".[eightsleep]"
+cp .env.example .env          # fill in DATABASE_URL + provider creds
+alembic upgrade head          # against your Postgres (local or remote)
+```
+
+## Option 1 — embedded scheduler (simplest)
+
+Run the app as a long-lived service; its built-in scheduler fires at `SYNC_HOUR`.
+Keep `ENABLE_SCHEDULER=true` (the default). Example systemd unit:
+
+```ini
+# /etc/systemd/system/healthos.service
+[Unit]
+Description=HealthOS
+After=network-online.target postgresql.service
+
+[Service]
+WorkingDirectory=/home/you/sandbox/healthos
+EnvironmentFile=/home/you/sandbox/healthos/.env
+ExecStart=/home/you/sandbox/healthos/.venv/bin/uvicorn healthos.main:app --host 0.0.0.0 --port 8000
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now healthos
+```
+
+## Option 2 — external cron owns the schedule (recommended for a cron box)
+
+Turn the in-process scheduler **off** so the two never double-sync (important for
+Garmin's rate limits): set `ENABLE_SCHEDULER=false` in `.env`. Run the web app
+the same way (for the dashboard, webhook, OAuth, MCP), then add a cron entry that
+runs the sync:
+
+```cron
+# crontab -e  — 6:00am local, nightly. Logs to a file you can tail.
+0 6 * * *  cd /home/you/sandbox/healthos && .venv/bin/healthos sync >> /var/log/healthos-sync.log 2>&1
+```
+
+`healthos sync` pulls all three sources for yesterday and runs inference — the
+same work the embedded job does. (Alternatively, hit the running app:
+`curl -X POST http://localhost:8000/api/admin/sync`.)
+
+> Note: even self-hosted, the Whoop OAuth callback and the iOS Shortcuts webhook
+> need the app reachable at a URL. On a home box, expose it with a tunnel
+> (Tailscale, `cloudflared`) or a reverse proxy — you don't need to open ports to
+> the public internet.
