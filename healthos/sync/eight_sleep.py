@@ -97,6 +97,16 @@ class EightSleepClient:
         resp.raise_for_status()
         return resp.json()
 
+    def device(self, device_id: str) -> dict:
+        """Device detail — includes leftUserId / rightUserId / ownerId."""
+        if self._token is None:
+            self.login()
+        resp = self._client.get(
+            f"{API_BASE}/devices/{device_id}", headers=self._auth_headers()
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     def trends_raw(self, start_date: _date, end_date: _date) -> dict:
         """The raw trends response — also exposed via `healthos es-raw` so the
         real payload shape can be inspected when normalization comes up empty."""

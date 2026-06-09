@@ -93,60 +93,55 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
     print("\n  ✓ connected   ✗ configured but failing   ○ not set up yet")
 
 
-def _cmd_es_raw(args: argparse.Namespace) -> None:
-    """Probe Eight Sleep endpoints to find where the data actually lives."""
-    import json
-
+def _cmd_es_raw(_args: argparse.Namespace) -> None:
+    """Map every Eight Sleep device + user and report each one's newest data."""
     from .sync.eight_sleep import EightSleepClient
 
-    def shorten(obj, depth=0):
-        """Truncate long arrays so timeseries don't flood the output."""
-        if isinstance(obj, list):
-            head = [shorten(x, depth + 1) for x in obj[:2]]
-            return head + [f"...(+{len(obj) - 2} more)"] if len(obj) > 2 else head
-        if isinstance(obj, dict):
-            return {k: shorten(v, depth + 1) for k, v in obj.items()}
-        return obj
+    def interval_span(intervals: list[dict]) -> str:
+        ts = sorted(i.get("ts", "") for i in intervals if i.get("ts"))
+        if not ts:
+            return "no timestamps"
+        return f"{ts[0][:10]} .. {ts[-1][:10]}"
 
     client = EightSleepClient()
     try:
         token_uid = client.login()
-        print(f"# token userId: {token_uid}\n")
+        me = client.me()
+        u = me.get("user") or me
+        print(f"# logged in as: {u.get('firstName', '?')}  userId={token_uid}")
 
-        print("# /users/me")
-        try:
-            me = client.me()
-            print(json.dumps(shorten(me), indent=2))
-            # Collect candidate user ids from the profile (self + partner sides).
-            candidates = {token_uid}
-            u = me.get("user") or me
-            dev = u.get("currentDevice") or {}
-            for k in ("ownerId", "leftUserId", "rightUserId"):
-                if dev.get(k):
-                    candidates.add(str(dev[k]))
-        except Exception as exc:  # noqa: BLE001
-            print(f"  failed: {exc}")
-            candidates = {token_uid}
+        user_ids: set[str] = {token_uid}
+        for key in ("sharingMetricsTo", "sharingMetricsFrom"):
+            for uid in u.get(key) or []:
+                user_ids.add(str(uid))
 
-        for uid in candidates:
-            print(f"\n# /users/{uid}/intervals")
+        device_ids = list(u.get("devices") or [])
+        cur = u.get("currentDevice") or {}
+        if cur.get("id"):
+            device_ids.append(cur["id"])
+
+        print("\n# devices")
+        for did in dict.fromkeys(device_ids):  # de-dupe, keep order
             try:
-                data = client.intervals(uid)
-                ivals = data.get("intervals", [])
-                print(f"  intervals returned: {len(ivals)}")
-                if ivals:
-                    print(json.dumps(shorten(ivals[0]), indent=2)[:2000])
+                dev = client.device(did)
+                d = dev.get("result") or dev
+                print(f"  {did}")
+                for k in ("deviceId", "ownerId", "leftUserId", "rightUserId", "timezone"):
+                    if d.get(k):
+                        print(f"      {k}: {d[k]}")
+                        if k.endswith("UserId") or k == "ownerId":
+                            user_ids.add(str(d[k]))
             except Exception as exc:  # noqa: BLE001
-                print(f"  failed: {exc}")
+                print(f"  {did}  (detail failed: {exc})")
 
-        end = date.today()
-        start = end - timedelta(days=args.days)
-        print(f"\n# /trends {start}..{end}")
-        try:
-            t = client.trends_raw(start, end)
-            print(f"  days returned: {len(t.get('days', []))}")
-        except Exception as exc:  # noqa: BLE001
-            print(f"  failed: {exc}")
+        print("\n# intervals per user (newest data wins)")
+        for uid in user_ids:
+            try:
+                ivals = client.intervals(uid).get("intervals", [])
+                tag = " <- YOU" if uid == token_uid else ""
+                print(f"  {uid}{tag}: {len(ivals)} sessions   {interval_span(ivals)}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"  {uid}: failed ({exc})")
     finally:
         client.close()
 
