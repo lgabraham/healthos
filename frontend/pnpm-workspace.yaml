@@ -1,0 +1,3 @@
+# pnpm 10.x moved build-script approval here (out of package.json).
+onlyBuiltDependencies:
+  - esbuild
