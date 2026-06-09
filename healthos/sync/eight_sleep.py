@@ -1,19 +1,23 @@
-"""Eight Sleep sync via the unofficial ``pyeight`` community client.
+"""Eight Sleep sync via the modern OAuth2 API.
+
+Eight Sleep deprecated the legacy ``/v1/login`` endpoint (it now returns 400
+for everyone), which broke the old ``pyeight`` library. We authenticate the way
+the mobile app does: an OAuth2 password grant against ``auth-api.8slp.net``
+using the app's public client credentials (the same values community
+integrations ship; overridable via env if Eight Sleep rotates them).
 
 Eight Sleep is canonical for the sleep *environment*: bed/skin temperature and
-toss-and-turn counts. The full skin-temp time series is preserved in raw_json
-so the sauna-inference rule can mine it later.
-
-The unofficial API token expires aggressively, so the client wrapper builds a
-fresh authenticated session per pull and tolerates transient failures.
+toss-and-turn counts. Full session payloads are preserved in raw_json so the
+sauna-inference rule can mine the temperature curves later.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import date as _date
-from datetime import datetime, timedelta
+from datetime import datetime
+
+import httpx
 
 from ..config import settings
 from .persistence import MetricPoint, SleepRecord
@@ -21,48 +25,90 @@ from .persistence import MetricPoint, SleepRecord
 log = logging.getLogger(__name__)
 
 SOURCE = "eight_sleep"
+AUTH_URL = "https://auth-api.8slp.net/v1/tokens"
+API_BASE = "https://client-api.8slp.net/v1"
+
+# Public OAuth client embedded in the Eight Sleep mobile app — not a user
+# secret. Published by community integrations; override via env if rotated.
+DEFAULT_CLIENT_ID = "0894c7f33bb94800a03f1f4df13a4f38"
+DEFAULT_CLIENT_SECRET = "f0954a3ed5763ba3d06834c73731a32f15f168f47d4f164751275def86db0c76"
+
+
+class EightSleepAuthError(RuntimeError):
+    pass
 
 
 class EightSleepClient:
-    """Async wrapper around pyeight, exposed with a sync ``pull`` facade."""
+    """Minimal direct client: OAuth2 token + the trends endpoint."""
 
-    def __init__(self) -> None:
+    def __init__(self, transport: httpx.BaseTransport | None = None) -> None:
         if not (settings.eight_sleep_email and settings.eight_sleep_password):
-            raise RuntimeError(
+            raise EightSleepAuthError(
                 "Eight Sleep credentials missing (EIGHT_SLEEP_EMAIL / EIGHT_SLEEP_PASSWORD)."
             )
+        self._client = httpx.Client(timeout=30.0, transport=transport)
+        self._token: str | None = None
+        self._user_id: str | None = None
 
-    async def _fetch(self, start_date: _date, end_date: _date) -> list[dict]:
-        from pyeight.eight import EightSleep  # lazy import; optional dependency
-
-        eight = EightSleep(
-            settings.eight_sleep_email,
-            settings.eight_sleep_password,
-            settings.timezone,
-        )
-        sessions: list[dict] = []
-        try:
-            await eight.start()
-            user = eight.users[next(iter(eight.users))] if eight.users else None
-            if user is None:
-                return []
-            day = start_date
-            while day <= end_date:
-                try:
-                    await user.update_trend_data(day.isoformat(), day.isoformat())
-                    intervals = getattr(user, "intervals", None) or []
-                    for interval in intervals:
-                        interval.setdefault("_query_date", day.isoformat())
-                        sessions.append(interval)
-                except Exception as exc:  # noqa: BLE001 - skip a bad night, keep going
-                    log.warning("Eight Sleep fetch failed for %s: %s", day, exc)
-                day += timedelta(days=1)
-        finally:
-            await eight.stop()
-        return sessions
+    def login(self) -> str:
+        """Authenticate and return the user id. Raises with the server's
+        response body on failure so misconfig is diagnosable."""
+        payload = {
+            "client_id": settings.eight_sleep_client_id or DEFAULT_CLIENT_ID,
+            "client_secret": settings.eight_sleep_client_secret or DEFAULT_CLIENT_SECRET,
+            "grant_type": "password",
+            "username": settings.eight_sleep_email,
+            "password": settings.eight_sleep_password,
+        }
+        resp = self._client.post(AUTH_URL, json=payload)
+        if resp.status_code != 200:
+            raise EightSleepAuthError(
+                f"Eight Sleep auth failed: {resp.status_code} {resp.text[:300]}"
+            )
+        data = resp.json()
+        self._token = data["access_token"]
+        self._user_id = str(data.get("userId") or data.get("user_id") or "")
+        if not self._user_id:
+            raise EightSleepAuthError(f"Eight Sleep auth ok but no userId in response: {data}")
+        log.info("Authenticated to Eight Sleep.")
+        return self._user_id
 
     def fetch(self, start_date: _date, end_date: _date) -> list[dict]:
-        return asyncio.run(self._fetch(start_date, end_date))
+        """Sleep sessions for the inclusive date range, via /users/{id}/trends."""
+        if self._token is None:
+            self.login()
+        params = {
+            "tz": settings.timezone,
+            "from": start_date.isoformat(),
+            "to": end_date.isoformat(),
+            "include-main": "false",
+            "include-all-sessions": "true",
+            "model-version": "v2",
+        }
+        url = f"{API_BASE}/users/{self._user_id}/trends"
+        resp = self._client.get(url, params=params, headers=self._auth_headers())
+        if resp.status_code == 401:  # token expired mid-run; re-auth once
+            self.login()
+            resp = self._client.get(url, params=params, headers=self._auth_headers())
+        resp.raise_for_status()
+        days = resp.json().get("days", [])
+
+        sessions: list[dict] = []
+        for day in days:
+            day_sessions = day.get("sessions") or []
+            for s in day_sessions:
+                s.setdefault("_query_date", day.get("day"))
+                sessions.append(s)
+            # Some accounts return day-level aggregates without a sessions list.
+            if not day_sessions and (day.get("score") is not None or day.get("sleepDuration")):
+                sessions.append({**day, "_query_date": day.get("day")})
+        return sessions
+
+    def _auth_headers(self) -> dict[str, str]:
+        return {"authorization": f"Bearer {self._token}"}
+
+    def close(self) -> None:
+        self._client.close()
 
 
 # -- normalization ----------------------------------------------------------
@@ -79,7 +125,7 @@ def _local_date(interval: dict) -> _date | None:
     start = _parse_dt(interval.get("ts"))
     if start is not None:
         return start.astimezone(settings.tz).date()
-    q = interval.get("_query_date")
+    q = interval.get("_query_date") or interval.get("day")
     return _date.fromisoformat(q) if q else None
 
 
@@ -109,7 +155,7 @@ def normalize(sessions: list[dict]) -> tuple[list[SleepRecord], list[MetricPoint
                 awake_minutes=durations.get("awake"),
                 sleep_score=interval.get("score"),
                 stages_json={"stages": stages},
-                raw_json=interval,  # preserves skin-temp time series for sauna inference
+                raw_json=interval,  # preserves temperature series for sauna inference
             )
         )
         for metric, value in [
@@ -129,11 +175,11 @@ def _stage_durations(stages: list[dict]) -> dict[str, int]:
     for s in stages:
         stage = (s.get("stage") or "").lower()
         seconds = s.get("duration") or 0
-        if stage in ("rem",):
+        if stage == "rem":
             buckets["rem"] += seconds
-        elif stage in ("deep",):
+        elif stage == "deep":
             buckets["deep"] += seconds
-        elif stage in ("light",):
+        elif stage == "light":
             buckets["light"] += seconds
         elif stage in ("awake", "out"):
             buckets["awake"] += seconds
@@ -153,7 +199,12 @@ def _avg(series) -> float | None:
 
 # -- orchestration ----------------------------------------------------------
 def pull(start_date: _date, end_date: _date, client: EightSleepClient | None = None) -> dict:
+    own = client is None
     client = client or EightSleepClient()
-    sessions = client.fetch(start_date, end_date)
+    try:
+        sessions = client.fetch(start_date, end_date)
+    finally:
+        if own:
+            client.close()
     sleeps, points = normalize(sessions)
     return {"metrics": points, "sleeps": sleeps, "workouts": []}

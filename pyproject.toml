@@ -20,10 +20,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Eight Sleep has no stable PyPI package name across forks; pin the community client here.
-eightsleep = [
-    "pyeight>=0.3.2",
-]
+# Eight Sleep support is now built in (direct httpx client against the modern
+# OAuth API). This empty extra is kept so existing install commands still work.
+eightsleep = []
 dev = [
     "pytest>=8.2",
     "ruff>=0.5",

@@ -44,6 +44,12 @@ class Settings(BaseSettings):
     # Eight Sleep ----------------------------------------------------------
     eight_sleep_email: str | None = Field(default=None, alias="EIGHT_SLEEP_EMAIL")
     eight_sleep_password: str | None = Field(default=None, alias="EIGHT_SLEEP_PASSWORD")
+    # Optional override of the mobile app's public OAuth client (see
+    # sync/eight_sleep.py); only needed if Eight Sleep rotates it.
+    eight_sleep_client_id: str | None = Field(default=None, alias="EIGHT_SLEEP_CLIENT_ID")
+    eight_sleep_client_secret: str | None = Field(
+        default=None, alias="EIGHT_SLEEP_CLIENT_SECRET"
+    )
 
     # App ------------------------------------------------------------------
     timezone: str = Field(default="America/Los_Angeles", alias="TIMEZONE")

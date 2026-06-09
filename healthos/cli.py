@@ -77,11 +77,12 @@ def _cmd_infer(args: argparse.Namespace) -> None:
     print(f"Inferred {total} events.")
 
 
-def _cmd_doctor(_args: argparse.Namespace) -> None:
+def _cmd_doctor(args: argparse.Namespace) -> None:
     from .authcheck import ProviderStatus, check_all
 
+    only = getattr(args, "only", None)
     print("HealthOS auth check:\n")
-    rows = check_all()
+    rows = check_all(only=only)
     for r in rows:
         status = ProviderStatus(**r)
         print(f"  {status.symbol} {status.provider:12s} {status.detail}")
@@ -110,7 +111,15 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("init-db").set_defaults(func=_cmd_init_db)
     sub.add_parser("setup").set_defaults(func=_cmd_setup)
     sub.add_parser("whoop-auth").set_defaults(func=_cmd_whoop_auth)
-    sub.add_parser("doctor").set_defaults(func=_cmd_doctor)
+
+    d = sub.add_parser("doctor")
+    d.add_argument(
+        "--only",
+        choices=["whoop", "garmin", "eight_sleep"],
+        default=None,
+        help="check a single provider (avoids poking rate-limited ones)",
+    )
+    d.set_defaults(func=_cmd_doctor)
 
     s = sub.add_parser("sync")
     s.add_argument("--days", type=int, default=1)

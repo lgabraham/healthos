@@ -92,35 +92,27 @@ def check_eight_sleep() -> ProviderStatus:
             "Set EIGHT_SLEEP_EMAIL and EIGHT_SLEEP_PASSWORD.",
         )
     try:
-        import asyncio
+        from .sync.eight_sleep import EightSleepClient
 
-        from pyeight.eight import EightSleep
-
-        async def _ping() -> bool:
-            eight = EightSleep(
-                settings.eight_sleep_email,
-                settings.eight_sleep_password,
-                settings.timezone,
-            )
-            try:
-                await eight.start()
-                return bool(eight.users)
-            finally:
-                await eight.stop()
-
-        ok = asyncio.run(_ping())
+        client = EightSleepClient()
+        user_id = client.login()
+        client.close()
         return ProviderStatus(
-            "eight_sleep", True, ok,
-            "Authenticated." if ok else "Authenticated but no users found.",
-        )
-    except ImportError:
-        return ProviderStatus(
-            "eight_sleep", True, False,
-            "pyeight not installed (uv pip install '.[eightsleep]').",
+            "eight_sleep", True, True, f"Authenticated (user {user_id[:8]}…)."
         )
     except Exception as exc:  # noqa: BLE001
-        return ProviderStatus("eight_sleep", True, False, f"Auth failed: {exc}")
+        return ProviderStatus("eight_sleep", True, False, str(exc))
 
 
-def check_all() -> list[dict]:
-    return [asdict(c) for c in (check_whoop(), check_garmin(), check_eight_sleep())]
+CHECKS = {
+    "whoop": check_whoop,
+    "garmin": check_garmin,
+    "eight_sleep": check_eight_sleep,
+}
+
+
+def check_all(only: str | None = None) -> list[dict]:
+    """Check all providers, or just one — handy when a provider (Garmin) is
+    rate-limiting and shouldn't be poked while testing the others."""
+    names = [only] if only else list(CHECKS)
+    return [asdict(CHECKS[n]()) for n in names]

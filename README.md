@@ -95,8 +95,9 @@ HealthOS auth check:
 
 - **Garmin** — set `GARMIN_EMAIL` + `GARMIN_PASSWORD`. That's it (can be done
   from a phone via the Railway dashboard).
-- **Eight Sleep** — set `EIGHT_SLEEP_EMAIL` + `EIGHT_SLEEP_PASSWORD`, and install
-  the optional client (`uv pip install '.[eightsleep]'`).
+- **Eight Sleep** — set `EIGHT_SLEEP_EMAIL` + `EIGHT_SLEEP_PASSWORD`. Support is
+  built in (modern OAuth API; the legacy login endpoint old libraries used now
+  returns 400).
 - **Whoop** — register an app at [developer.whoop.com](https://developer.whoop.com)
   (easiest on desktop), set its redirect URI to `…/auth/whoop/callback`, and put
   `WHOOP_CLIENT_ID` + `WHOOP_CLIENT_SECRET` in env. Then open `/auth/whoop` in any
