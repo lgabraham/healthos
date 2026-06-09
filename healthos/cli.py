@@ -94,19 +94,61 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
 
 
 def _cmd_es_raw(args: argparse.Namespace) -> None:
-    """Dump Eight Sleep's raw trends JSON (debugging aid for empty syncs)."""
+    """Probe Eight Sleep endpoints to find where the data actually lives."""
     import json
 
     from .sync.eight_sleep import EightSleepClient
 
-    end = date.today()
-    start = end - timedelta(days=args.days)
+    def shorten(obj, depth=0):
+        """Truncate long arrays so timeseries don't flood the output."""
+        if isinstance(obj, list):
+            head = [shorten(x, depth + 1) for x in obj[:2]]
+            return head + [f"...(+{len(obj) - 2} more)"] if len(obj) > 2 else head
+        if isinstance(obj, dict):
+            return {k: shorten(v, depth + 1) for k, v in obj.items()}
+        return obj
+
     client = EightSleepClient()
     try:
-        data = client.trends_raw(start, end)
+        token_uid = client.login()
+        print(f"# token userId: {token_uid}\n")
+
+        print("# /users/me")
+        try:
+            me = client.me()
+            print(json.dumps(shorten(me), indent=2))
+            # Collect candidate user ids from the profile (self + partner sides).
+            candidates = {token_uid}
+            u = me.get("user") or me
+            dev = u.get("currentDevice") or {}
+            for k in ("ownerId", "leftUserId", "rightUserId"):
+                if dev.get(k):
+                    candidates.add(str(dev[k]))
+        except Exception as exc:  # noqa: BLE001
+            print(f"  failed: {exc}")
+            candidates = {token_uid}
+
+        for uid in candidates:
+            print(f"\n# /users/{uid}/intervals")
+            try:
+                data = client.intervals(uid)
+                ivals = data.get("intervals", [])
+                print(f"  intervals returned: {len(ivals)}")
+                if ivals:
+                    print(json.dumps(shorten(ivals[0]), indent=2)[:2000])
+            except Exception as exc:  # noqa: BLE001
+                print(f"  failed: {exc}")
+
+        end = date.today()
+        start = end - timedelta(days=args.days)
+        print(f"\n# /trends {start}..{end}")
+        try:
+            t = client.trends_raw(start, end)
+            print(f"  days returned: {len(t.get('days', []))}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"  failed: {exc}")
     finally:
         client.close()
-    print(json.dumps(data, indent=2))
 
 
 def _cmd_summary(args: argparse.Namespace) -> None:

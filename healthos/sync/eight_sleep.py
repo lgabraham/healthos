@@ -73,6 +73,30 @@ class EightSleepClient:
         log.info("Authenticated to Eight Sleep.")
         return self._user_id
 
+    def me(self) -> dict:
+        """Account/profile, incl. userId, devices, and partner sides."""
+        if self._token is None:
+            self.login()
+        resp = self._client.get(f"{API_BASE}/users/me", headers=self._auth_headers())
+        resp.raise_for_status()
+        return resp.json()
+
+    def intervals(self, user_id: str | None = None) -> dict:
+        """Detailed sleep sessions (stages + timeseries) for a user."""
+        if self._token is None:
+            self.login()
+        uid = user_id or self._user_id
+        resp = self._client.get(
+            f"{API_BASE}/users/{uid}/intervals", headers=self._auth_headers()
+        )
+        if resp.status_code == 401:
+            self.login()
+            resp = self._client.get(
+                f"{API_BASE}/users/{uid}/intervals", headers=self._auth_headers()
+            )
+        resp.raise_for_status()
+        return resp.json()
+
     def trends_raw(self, start_date: _date, end_date: _date) -> dict:
         """The raw trends response — also exposed via `healthos es-raw` so the
         real payload shape can be inspected when normalization comes up empty."""
