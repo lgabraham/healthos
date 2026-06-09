@@ -49,51 +49,60 @@ def test_login_failure_includes_server_response():
         client.login()
 
 
-def test_fetch_returns_sessions_with_query_date():
+def test_fetch_and_normalize_intervals():
+    """Mirrors the real /intervals payload: stages + a [time, value] timeseries."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         if str(request.url).startswith(es.AUTH_URL):
             return httpx.Response(200, json={"access_token": "tok", "userId": "u-1"})
         assert request.headers["authorization"] == "Bearer tok"
-        assert "/users/u-1/trends" in str(request.url)
+        assert "/users/u-1/intervals" in str(request.url)
         return httpx.Response(
             200,
             json={
-                "days": [
+                "intervals": [
                     {
-                        "day": "2026-06-07",
-                        "sessions": [
-                            {
-                                "ts": "2026-06-07T06:30:00Z",
-                                "score": 82,
-                                "tnt": 3,
-                                "tempBedC": [27.1, 27.4],
-                                "stages": [
-                                    {"stage": "light", "duration": 3600},
-                                    {"stage": "deep", "duration": 5400},
-                                    {"stage": "rem", "duration": 4500},
-                                ],
-                            }
+                        "id": "1676176680",
+                        "ts": "2023-02-12T05:45:00.000Z",
+                        "score": 76,
+                        "stages": [
+                            {"stage": "awake", "duration": 2640},
+                            {"stage": "light", "duration": 3600},
+                            {"stage": "deep", "duration": 5400},
+                            {"stage": "rem", "duration": 4500},
                         ],
-                    },
-                    {"day": "2026-06-08", "score": 75, "sleepDuration": 25200},
+                        "timeseries": {
+                            "tnt": [
+                                ["2023-02-12T08:45:00.000Z", 1],
+                                ["2023-02-12T09:45:00.000Z", 1],
+                            ],
+                            "tempBedC": [
+                                ["2023-02-12T04:00:00.000Z", 18.61],
+                                ["2023-02-12T05:00:00.000Z", 21.37],
+                            ],
+                            "tempRoomC": [["2023-02-12T05:00:00.000Z", 17.7]],
+                        },
+                    }
                 ]
             },
         )
 
     client = es.EightSleepClient(transport=_transport(handler))
-    sessions = client.fetch(date(2026, 6, 7), date(2026, 6, 8))
-    assert len(sessions) == 2  # one real session + one day-level fallback
-    assert sessions[0]["_query_date"] == "2026-06-07"
-    assert sessions[1]["_query_date"] == "2026-06-08"
+    sessions = client.fetch(date(2023, 2, 1), date(2023, 2, 28))
+    assert len(sessions) == 1
 
     sleeps, points = es.normalize(sessions)
-    assert len(sleeps) == 2
-    first = sleeps[0]
-    assert first.deep_minutes == 90
-    assert first.rem_minutes == 75
-    assert float(first.sleep_score) == 82
-    metric_names = {p.metric for p in points}
-    assert {"bed_temp", "toss_turn_count"} <= metric_names
+    assert len(sleeps) == 1
+    s = sleeps[0]
+    assert s.deep_minutes == 90
+    assert s.rem_minutes == 75
+    assert s.light_minutes == 60
+    assert float(s.sleep_score) == 76
+
+    by_metric = {p.metric: p.value for p in points}
+    assert by_metric["toss_turn_count"] == 2  # summed from the tnt series
+    assert round(by_metric["bed_temp"], 2) == 19.99  # avg(18.61, 21.37)
+    assert "room_temp" in by_metric
 
 
 def test_missing_credentials_raise(monkeypatch):

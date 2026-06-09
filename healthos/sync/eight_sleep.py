@@ -119,19 +119,14 @@ class EightSleepClient:
         return resp.json()
 
     def fetch(self, start_date: _date, end_date: _date) -> list[dict]:
-        """Sleep sessions for the inclusive date range, via /users/{id}/trends."""
-        days = self.trends_raw(start_date, end_date).get("days", [])
+        """Recent sleep sessions via /users/{id}/intervals.
 
-        sessions: list[dict] = []
-        for day in days:
-            day_sessions = day.get("sessions") or []
-            for s in day_sessions:
-                s.setdefault("_query_date", day.get("day"))
-                sessions.append(s)
-            # Some accounts return day-level aggregates without a sessions list.
-            if not day_sessions and (day.get("score") is not None or day.get("sleepDuration")):
-                sessions.append({**day, "_query_date": day.get("day")})
-        return sessions
+        The intervals endpoint returns the most recent sessions Eight Sleep has
+        (each with stages + a per-session timeseries). It doesn't take a date
+        range, so we return everything it gives and let the date filter happen
+        downstream — important here, since an account may only have older data.
+        """
+        return self.intervals().get("intervals", [])
 
     def _auth_headers(self) -> dict[str, str]:
         return {"authorization": f"Bearer {self._token}"}
@@ -158,6 +153,20 @@ def _local_date(interval: dict) -> _date | None:
     return _date.fromisoformat(q) if q else None
 
 
+def _series_values(timeseries: dict, key: str) -> list[float]:
+    """Pull numeric values from a `[[timestamp, value], ...]` timeseries."""
+    series = (timeseries or {}).get(key)
+    if not isinstance(series, list):
+        return []
+    out: list[float] = []
+    for pair in series:
+        if isinstance(pair, (list, tuple)) and len(pair) == 2 and isinstance(pair[1], (int, float)):
+            out.append(float(pair[1]))
+        elif isinstance(pair, (int, float)):
+            out.append(float(pair))
+    return out
+
+
 def normalize(sessions: list[dict]) -> tuple[list[SleepRecord], list[MetricPoint]]:
     sleeps: list[SleepRecord] = []
     points: list[MetricPoint] = []
@@ -167,10 +176,13 @@ def normalize(sessions: list[dict]) -> tuple[list[SleepRecord], list[MetricPoint
             continue
         stages = interval.get("stages") or []
         durations = _stage_durations(stages)
-        toss = interval.get("tnt") or interval.get("tossAndTurns")
-        bed_temp = _avg(interval.get("tempBedC") or interval.get("bedTemp"))
-        skin_temp = _avg(interval.get("tempSkinC") or interval.get("skinTemp"))
-        room_temp = _avg(interval.get("tempRoomC") or interval.get("roomTemp"))
+        ts = interval.get("timeseries") or {}
+        # Temps + toss/turn live under `timeseries` as [time, value] pairs.
+        bed_temp = _avg(_series_values(ts, "tempBedC"))
+        skin_temp = _avg(_series_values(ts, "tempSkinC"))
+        room_temp = _avg(_series_values(ts, "tempRoomC"))
+        tnt_values = _series_values(ts, "tnt")
+        toss = sum(tnt_values) if tnt_values else (interval.get("tnt") or None)
 
         sleeps.append(
             SleepRecord(
