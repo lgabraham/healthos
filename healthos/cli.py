@@ -44,11 +44,15 @@ def _cmd_whoop_auth(_args: argparse.Namespace) -> None:
 
 
 def _cmd_sync(args: argparse.Namespace) -> None:
-    from .sync.runner import sync_all
+    from .sync.runner import sync_all, sync_source
 
     end = date.today() - timedelta(days=1)
     start = end - timedelta(days=args.days - 1)
-    results = sync_all(start, end, sync_type="manual")
+    source = getattr(args, "source", None)
+    if source:
+        results = [sync_source(source, start, end, sync_type="manual")]
+    else:
+        results = sync_all(start, end, sync_type="manual")
     for r in results:
         print(f"  {r.source:12s} {r.status:8s} {r.records_written} records "
               f"{'; '.join(r.errors)}")
@@ -123,6 +127,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("sync")
     s.add_argument("--days", type=int, default=1)
+    s.add_argument(
+        "--source",
+        choices=["whoop", "garmin", "eight_sleep"],
+        default=None,
+        help="sync a single provider (default: all)",
+    )
     s.set_defaults(func=_cmd_sync)
 
     b = sub.add_parser("backfill")
