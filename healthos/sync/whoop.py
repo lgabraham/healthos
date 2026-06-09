@@ -131,22 +131,26 @@ class WhoopClient:
             params["nextToken"] = token
         return records
 
-    # -- endpoints ---------------------------------------------------------
+    # -- endpoints (v2 — Whoop removed the v1 data API on 2025-10-01) -------
     def profile(self) -> dict:
         """Basic user profile — a cheap call used by the auth self-check."""
-        return self._get("/v1/user/profile/basic")
+        return self._get("/v2/user/profile/basic")
+
+    def first_page(self, path: str, start: datetime, end: datetime) -> dict:
+        """One page of a collection — used by the whoop-raw debug command."""
+        return self._get(path, params={"start": _iso(start), "end": _iso(end), "limit": 5})
 
     def recovery(self, start: datetime, end: datetime) -> list[dict]:
-        return self._paginate("/v1/recovery", start, end)
+        return self._paginate("/v2/recovery", start, end)
 
     def sleep(self, start: datetime, end: datetime) -> list[dict]:
-        return self._paginate("/v1/activity/sleep", start, end)
+        return self._paginate("/v2/activity/sleep", start, end)
 
     def workouts(self, start: datetime, end: datetime) -> list[dict]:
-        return self._paginate("/v1/activity/workout", start, end)
+        return self._paginate("/v2/activity/workout", start, end)
 
     def cycles(self, start: datetime, end: datetime) -> list[dict]:
-        return self._paginate("/v1/cycle", start, end)
+        return self._paginate("/v2/cycle", start, end)
 
     def close(self) -> None:
         self._client.close()
@@ -286,7 +290,8 @@ def normalize_workouts(records: list[dict]) -> list[WorkoutRecord]:
                 external_id=str(rec.get("id")) if rec.get("id") is not None else None,
                 start_time=start,
                 end_time=end,
-                sport_type=str(rec.get("sport_id")) if rec.get("sport_id") is not None else None,
+                sport_type=rec.get("sport_name")
+                or (str(rec.get("sport_id")) if rec.get("sport_id") is not None else None),
                 duration_minutes=duration,
                 hr_avg=score.get("average_heart_rate"),
                 hr_max=score.get("max_heart_rate"),

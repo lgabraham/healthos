@@ -146,6 +146,33 @@ def _cmd_es_raw(_args: argparse.Namespace) -> None:
         client.close()
 
 
+def _cmd_whoop_raw(args: argparse.Namespace) -> None:
+    """Dump one page of each Whoop v2 endpoint (debugging aid)."""
+    import json
+    from datetime import datetime, time
+
+    from .config import settings
+    from .sync.whoop import WhoopClient
+
+    client = WhoopClient.from_store()
+    start = datetime.combine(date.today() - timedelta(days=args.days), time.min, tzinfo=settings.tz)
+    end = datetime.combine(date.today(), time.max, tzinfo=settings.tz)
+    try:
+        for path in ("/v2/recovery", "/v2/activity/sleep", "/v2/activity/workout", "/v2/cycle"):
+            print(f"# {path}")
+            try:
+                page = client.first_page(path, start, end)
+                recs = page.get("records", [])
+                print(f"  records: {len(recs)}")
+                if recs:
+                    print(json.dumps(recs[0], indent=2)[:1500])
+            except Exception as exc:  # noqa: BLE001
+                print(f"  failed: {exc}")
+            print()
+    finally:
+        client.close()
+
+
 def _cmd_summary(args: argparse.Namespace) -> None:
     from .database import get_session
     from .queries import canonical_value, rolling_baseline
@@ -200,6 +227,10 @@ def build_parser() -> argparse.ArgumentParser:
     er = sub.add_parser("es-raw", help="dump Eight Sleep raw trends JSON")
     er.add_argument("--days", type=int, default=3)
     er.set_defaults(func=_cmd_es_raw)
+
+    wr = sub.add_parser("whoop-raw", help="dump one page of each Whoop v2 endpoint")
+    wr.add_argument("--days", type=int, default=7)
+    wr.set_defaults(func=_cmd_whoop_raw)
 
     su = sub.add_parser("summary")
     su.add_argument("--date", default=None)
