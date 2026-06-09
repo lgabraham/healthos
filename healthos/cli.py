@@ -1,6 +1,7 @@
 """HealthOS command-line interface.
 
     healthos init-db                 create tables (dev shortcut; prefer alembic)
+    healthos setup                   interactive wizard to fill in .env credentials
     healthos whoop-auth              print the Whoop OAuth URL for first auth
     healthos doctor                  check which providers are connected
     healthos sync [--days N]         sync recent days for all sources
@@ -21,6 +22,18 @@ def _cmd_init_db(_args: argparse.Namespace) -> None:
 
     Base.metadata.create_all(engine)
     print("Created all tables.")
+
+
+def _cmd_setup(_args: argparse.Namespace) -> None:
+    from .setup_wizard import run_wizard
+
+    run_wizard()
+    try:
+        answer = input("Run `healthos doctor` now to verify? [Y/n] ").strip().lower()
+    except EOFError:
+        answer = "n"
+    if answer in ("", "y", "yes"):
+        _cmd_doctor(_args)
 
 
 def _cmd_whoop_auth(_args: argparse.Namespace) -> None:
@@ -95,6 +108,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="command", required=True)
 
     sub.add_parser("init-db").set_defaults(func=_cmd_init_db)
+    sub.add_parser("setup").set_defaults(func=_cmd_setup)
     sub.add_parser("whoop-auth").set_defaults(func=_cmd_whoop_auth)
     sub.add_parser("doctor").set_defaults(func=_cmd_doctor)
 
