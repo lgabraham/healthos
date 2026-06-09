@@ -73,8 +73,9 @@ class EightSleepClient:
         log.info("Authenticated to Eight Sleep.")
         return self._user_id
 
-    def fetch(self, start_date: _date, end_date: _date) -> list[dict]:
-        """Sleep sessions for the inclusive date range, via /users/{id}/trends."""
+    def trends_raw(self, start_date: _date, end_date: _date) -> dict:
+        """The raw trends response — also exposed via `healthos es-raw` so the
+        real payload shape can be inspected when normalization comes up empty."""
         if self._token is None:
             self.login()
         params = {
@@ -91,7 +92,11 @@ class EightSleepClient:
             self.login()
             resp = self._client.get(url, params=params, headers=self._auth_headers())
         resp.raise_for_status()
-        days = resp.json().get("days", [])
+        return resp.json()
+
+    def fetch(self, start_date: _date, end_date: _date) -> list[dict]:
+        """Sleep sessions for the inclusive date range, via /users/{id}/trends."""
+        days = self.trends_raw(start_date, end_date).get("days", [])
 
         sessions: list[dict] = []
         for day in days:

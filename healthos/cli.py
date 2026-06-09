@@ -93,6 +93,22 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
     print("\n  ✓ connected   ✗ configured but failing   ○ not set up yet")
 
 
+def _cmd_es_raw(args: argparse.Namespace) -> None:
+    """Dump Eight Sleep's raw trends JSON (debugging aid for empty syncs)."""
+    import json
+
+    from .sync.eight_sleep import EightSleepClient
+
+    end = date.today()
+    start = end - timedelta(days=args.days)
+    client = EightSleepClient()
+    try:
+        data = client.trends_raw(start, end)
+    finally:
+        client.close()
+    print(json.dumps(data, indent=2))
+
+
 def _cmd_summary(args: argparse.Namespace) -> None:
     from .database import get_session
     from .queries import canonical_value, rolling_baseline
@@ -143,6 +159,10 @@ def build_parser() -> argparse.ArgumentParser:
     i.add_argument("--start", required=True)
     i.add_argument("--end", required=True)
     i.set_defaults(func=_cmd_infer)
+
+    er = sub.add_parser("es-raw", help="dump Eight Sleep raw trends JSON")
+    er.add_argument("--days", type=int, default=3)
+    er.set_defaults(func=_cmd_es_raw)
 
     su = sub.add_parser("summary")
     su.add_argument("--date", default=None)
