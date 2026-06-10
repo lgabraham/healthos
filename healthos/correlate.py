@@ -7,6 +7,7 @@ Two flavours:
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import date as _date
 from datetime import timedelta
@@ -17,6 +18,8 @@ from sqlalchemy.orm import Session
 from .models import DailyEvent, DailyMetric
 from .queries import rolling_baseline
 from .stats import interpret_r, pearson
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -142,27 +145,49 @@ def correlate_event_to_metric_delta(
 
 
 def prebuilt_cards(session: Session, days: int = 90) -> list[dict]:
-    """The Correlations view's standing set of cards."""
-    cards = [
+    """The Correlations view's standing set of cards.
+
+    Each card is computed defensively so a single failure (or an unexpected data
+    shape) degrades to an error card instead of 500-ing the whole view.
+    """
+    specs = [
         (
             "Sauna nights -> next-day HRV delta",
-            correlate_event_to_metric_delta(session, "sauna", "hrv_rmssd", days, lag_days=1),
+            lambda: correlate_event_to_metric_delta(session, "sauna", "hrv_rmssd", days, 1),
         ),
         (
             "Alcohol events -> next-day recovery score",
-            correlate_event_to_metric_delta(
-                session, "alcohol_detected", "recovery_score", days, lag_days=1
+            lambda: correlate_event_to_metric_delta(
+                session, "alcohol_detected", "recovery_score", days, 1
             ),
         ),
         (
-            "Late workout -> sleep onset latency",
-            correlate_event_to_metric_delta(
-                session, "late_workout", "sleep_duration_minutes", days, lag_days=0
+            "Late workout -> sleep duration",
+            lambda: correlate_event_to_metric_delta(
+                session, "late_workout", "sleep_duration_minutes", days, 0
             ),
         ),
         (
             "Training load (TSS) -> next-day HRV",
-            correlate_metrics(session, "tss", "hrv_rmssd", days, lag_days=1),
+            lambda: correlate_metrics(session, "tss", "hrv_rmssd", days, 1),
         ),
     ]
-    return [{"title": title, **corr.to_dict()} for title, corr in cards]
+    out: list[dict] = []
+    for title, fn in specs:
+        try:
+            out.append({"title": title, **fn().to_dict()})
+        except Exception as exc:  # noqa: BLE001 - never let one card break the view
+            log.warning("Correlation card failed (%s): %s", title, exc)
+            out.append(
+                {
+                    "title": title,
+                    "metric_a": "",
+                    "metric_b": "",
+                    "lag_days": 0,
+                    "r": None,
+                    "n": 0,
+                    "points": [],
+                    "interpretation": f"Couldn't compute this card: {exc}",
+                }
+            )
+    return out
