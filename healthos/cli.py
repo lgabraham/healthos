@@ -239,6 +239,16 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    import logging
+    import os
+
+    # Surface INFO-level progress (sync heartbeats, Garmin login) on the console
+    # so long-running commands don't look hung. LOG_LEVEL can override.
+    logging.basicConfig(
+        level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
     parser = build_parser()
     args = parser.parse_args()
     args.func(args)

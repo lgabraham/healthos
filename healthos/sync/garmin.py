@@ -10,6 +10,7 @@ pulls out (see scripts/backfill.py). We add a small per-call delay here too.
 from __future__ import annotations
 
 import logging
+import os
 import time as _time
 from datetime import date as _date
 from datetime import datetime, timedelta
@@ -21,7 +22,8 @@ log = logging.getLogger(__name__)
 
 SOURCE = "garmin"
 # Politeness delay between Garmin calls; Garmin blocks aggressive scrapers.
-CALL_DELAY_SECONDS = 1.0
+# Tunable via GARMIN_CALL_DELAY for a one-off backfill (lower = faster, riskier).
+CALL_DELAY_SECONDS = float(os.environ.get("GARMIN_CALL_DELAY", "1.0"))
 
 
 class GarminClient:
@@ -244,13 +246,25 @@ def pull(start_date: _date, end_date: _date, client: GarminClient | None = None)
     client = client or GarminClient()
     metrics: list[MetricPoint] = []
     span_days = (end_date - start_date).days + 1
+    # ~2 paced calls/day (summary + HRV) plus a couple of range calls. Surface
+    # the estimate up front so a multi-minute backfill doesn't look hung.
+    est_calls = span_days * 2 + (span_days if span_days <= 7 else 1) + 2
+    log.info(
+        "Garmin: pulling %d day(s) %s..%s (~%d calls, ~%ds)",
+        span_days, start_date, end_date, est_calls, int(est_calls * CALL_DELAY_SECONDS),
+    )
     day = start_date
+    i = 0
     while day <= end_date:
         metrics += normalize_daily(day, client.daily_summary(day))
         metrics += normalize_hrv(day, client.hrv(day))
         # Training status per-day only on short syncs; else just the final day.
         if span_days <= 7 or day == end_date:
             metrics += normalize_training_status(day, client.training_status(day))
+        i += 1
+        # Periodic heartbeat so a long backfill visibly progresses.
+        if span_days > 7 and (i % 10 == 0 or day == end_date):
+            log.info("Garmin: %d/%d days (%s), %d metrics so far", i, span_days, day, len(metrics))
         day += timedelta(days=1)
     metrics += normalize_vo2max_range(client.vo2max_range(start_date, end_date))
     workouts, workout_points = normalize_activities(client.activities(start_date, end_date))
