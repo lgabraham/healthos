@@ -40,7 +40,8 @@ END:VCALENDAR"""
 def test_tag_keywords():
     assert "alcohol" in tag_keywords("Dinner with friends", None)
     assert "travel" in tag_keywords("Flight home", "SFO Airport")
-    assert tag_keywords("Sprint Planning", None) == []
+    assert "work" in tag_keywords("Sprint Planning", None)
+    assert tag_keywords("Pick up groceries", None) == []  # unclassified -> none
 
 
 def test_parse_feed_expands_and_tags():

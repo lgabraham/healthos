@@ -24,6 +24,7 @@ SOURCE = "calendar"
 # *suggest* context (e.g. an evening "dinner" raises the alcohol prior); they
 # never assert on their own.
 KEYWORD_TAGS: dict[str, str] = {
+    # alcohol / likely-drinking
     "drinks": "alcohol",
     "dinner": "alcohol",
     "happy hour": "alcohol",
@@ -39,11 +40,35 @@ KEYWORD_TAGS: dict[str, str] = {
     "celebration": "alcohol",
     "gala": "alcohol",
     "night out": "alcohol",
+    # travel
     "flight": "travel",
     "airport": "travel",
     "layover": "travel",
     "depart": "travel",
     "trip": "travel",
+    # work
+    "meeting": "work",
+    "standup": "work",
+    "stand-up": "work",
+    "1:1": "work",
+    "interview": "work",
+    "review": "work",
+    "sprint": "work",
+    "planning": "work",
+    "sync ": "work",
+    # exercise
+    "gym": "exercise",
+    "workout": "exercise",
+    "yoga": "exercise",
+    "pilates": "exercise",
+    "climb": "exercise",
+    "training": "exercise",
+    # health / appointments
+    "doctor": "health",
+    "dentist": "health",
+    "therapy": "health",
+    "appointment": "health",
+    "checkup": "health",
 }
 
 
