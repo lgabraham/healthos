@@ -11,7 +11,10 @@ export function useHealthData(fetcher, deps = []) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    fetcher()
+    // Promise.resolve().then(...) so a synchronous throw in the fetcher lands
+    // in .catch (an error message) instead of blanking the whole view.
+    Promise.resolve()
+      .then(() => fetcher())
       .then((d) => !cancelled && setData(d))
       .catch((e) => !cancelled && setError(e.message))
       .finally(() => !cancelled && setLoading(false));

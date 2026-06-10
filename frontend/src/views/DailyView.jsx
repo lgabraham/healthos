@@ -6,6 +6,7 @@ import MetricStat from "../components/MetricStat.jsx";
 import SleepCard from "../components/SleepCard.jsx";
 import EventTimeline from "../components/EventTimeline.jsx";
 import CalendarStrip from "../components/CalendarStrip.jsx";
+import AttributionPanel from "../components/AttributionPanel.jsx";
 import { hm, num } from "../format.js";
 
 function shiftDate(iso, days) {
@@ -61,6 +62,10 @@ export default function DailyView() {
         <MetricStat label="HRV (nocturnal)" metric={m.hrv_rmssd} unit="ms" spark={spark} />
         <MetricStat label="Resting HR" metric={m.resting_hr} unit="bpm" />
         <MetricStat label="Strain" metric={m.strain_score} digits={1} />
+      </div>
+
+      <div className="grid" style={{ marginTop: "0.85rem" }}>
+        <AttributionPanel date={daily.date} />
       </div>
 
       <div className="grid cols-2" style={{ marginTop: "0.85rem" }}>

@@ -143,6 +143,72 @@ def estimated_recovery(session: Session, day: _date) -> float | None:
     return round(max(1.0, min(99.0, score)), 1)
 
 
+# (metric, label, day_offset, invert) — invert=True means "lower is better",
+# so the sign flips to read as helping(+)/dragging(-) recovery.
+ATTRIBUTION_DRIVERS = [
+    ("hrv_rmssd", "HRV", 0, False),
+    ("resting_hr", "Resting HR", 0, True),
+    ("sleep_duration_minutes", "Sleep duration", 0, False),
+    ("respiratory_rate", "Respiratory rate", 0, True),
+    ("strain_score", "Yesterday's strain", 1, True),
+    ("bed_temp", "Bed temp", 0, True),
+]
+
+
+def attribution(session: Session, day: _date) -> dict:
+    """Decompose today's state into signed deviations from personal baselines.
+
+    Not a causal model of Whoop's score — each driver is the metric's deviation
+    from its own 30-day baseline, signed so positive = helping recovery. The
+    headline names the largest mover in plain language.
+    """
+    drivers: list[dict] = []
+    for metric, label, offset, invert in ATTRIBUTION_DRIVERS:
+        target = day - timedelta(days=offset)
+        resolved = best_available(session, target, metric)
+        base = rolling_baseline(session, metric, target)
+        if resolved.value is None or not base.mean:
+            continue
+        pct = (resolved.value / base.mean - 1.0) * 100.0
+        if invert:
+            pct = -pct
+        drivers.append(
+            {
+                "key": metric,
+                "label": label,
+                "pct": round(pct, 1),
+                "value": round(resolved.value, 1),
+                "baseline": round(base.mean, 1),
+                "baseline_n": base.n,
+                "source": resolved.source,
+                "is_fallback": resolved.is_fallback,
+            }
+        )
+    drivers.sort(key=lambda d: abs(d["pct"]), reverse=True)
+
+    headline = None
+    if drivers and abs(drivers[0]["pct"]) >= 5:
+        top = drivers[0]
+        direction = "helping" if top["pct"] > 0 else "dragging"
+        headline = (
+            f"{top['label']} is today's biggest mover: {top['value']} vs your "
+            f"baseline of {top['baseline']} ({direction} recovery"
+            f"{', via ' + top['source'] if top['is_fallback'] else ''})."
+        )
+    elif drivers:
+        headline = "Everything is close to baseline today — steady as she goes."
+
+    events = session.scalars(
+        select(DailyEvent).where(DailyEvent.date.in_([day, day - timedelta(days=1)]))
+    ).all()
+    event_notes = [
+        f"{e.event_type.replace('_', ' ')} ({'yesterday' if e.date != day else 'today'})"
+        for e in events
+    ]
+    return {"date": day.isoformat(), "drivers": drivers, "headline": headline,
+            "events": event_notes}
+
+
 def data_day_count(session: Session) -> int:
     """Distinct number of days we have any canonical metric for."""
     n = session.scalar(

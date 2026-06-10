@@ -39,7 +39,9 @@ def test_daily_summary_and_trend(session, client):
 
     trend = client.get("/api/trend/hrv_rmssd?days=60&rolling=7").json()
     assert trend["metric"] == "hrv_rmssd"
-    assert len(trend["series"]) == 40
+    # Padded to one entry per calendar day for cross-metric axis alignment.
+    assert len(trend["series"]) == 61
+    assert sum(1 for p in trend["series"] if p["value"] is not None) == 40
 
 
 def test_ios_webhook(session, client):
@@ -142,3 +144,32 @@ def test_coverage_grid(session, client):
     assert cell["hrv_rmssd"] == "whoop"
     assert cell["steps"] == "apple_health"
     assert cell["strain_score"] is None
+
+
+def test_attribution_and_aligned_trend(session, client):
+    from datetime import date, timedelta
+    from healthos.sync.persistence import MetricPoint, upsert_metrics
+
+    base = date(2026, 3, 1)
+    pts = []
+    for i in range(30):
+        d = base + timedelta(days=i)
+        pts += [MetricPoint(d, "hrv_rmssd", 60.0, "ms", "whoop"),
+                MetricPoint(d, "resting_hr", 50.0, "bpm", "whoop")]
+    target = base + timedelta(days=30)
+    pts += [MetricPoint(target, "hrv_rmssd", 45.0, "ms", "whoop"),   # -25% drag
+            MetricPoint(target, "resting_hr", 50.0, "bpm", "whoop")]  # neutral
+    upsert_metrics(session, pts)
+    session.commit()
+
+    a = client.get(f"/api/attribution?date={target.isoformat()}").json()
+    by_key = {d["key"]: d for d in a["drivers"]}
+    assert by_key["hrv_rmssd"]["pct"] < -20
+    assert a["drivers"][0]["key"] == "hrv_rmssd"  # biggest mover first
+    assert "HRV" in a["headline"]
+
+    # Trend padding: two different metrics share an identical date axis.
+    t1 = client.get("/api/trend/hrv_rmssd?days=40").json()
+    t2 = client.get("/api/trend/resting_hr?days=40").json()
+    assert [p["date"] for p in t1["series"]] == [p["date"] for p in t2["series"]]
+    assert len(t1["series"]) == 41  # one entry per calendar day

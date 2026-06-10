@@ -152,10 +152,22 @@ def trend(
     """Time series for a metric with a rolling average + event markers.
 
     Uses the best-available source per day (not just canonical), so the line
-    extends through the current day wherever any device has data.
+    extends through the current day wherever any device has data. The series is
+    padded to one entry per calendar day (nulls for gaps) so different metrics
+    share an identical, vertically-comparable x-axis.
     """
     series = metric_series(db, metric, days, canonical_only=False)
     enriched = rolling_average(series, rolling)
+    by_date = {p["date"]: p for p in enriched}
+    end = _latest_date_any(db)
+    start = end - timedelta(days=days)
+    enriched = [
+        by_date.get(
+            (start + timedelta(days=i)).isoformat(),
+            {"date": (start + timedelta(days=i)).isoformat(), "value": None, "rolling": None},
+        )
+        for i in range(days + 1)
+    ]
     event_rows = db.scalars(
         select(DailyEvent).where(DailyEvent.date >= _date.today() - timedelta(days=days))
     ).all()
@@ -251,6 +263,18 @@ def sync_log(
     ]
 
 
+@router.get("/attribution")
+def attribution_endpoint(
+    date: str | None = Query(default=None, description="YYYY-MM-DD; defaults to latest"),
+    db: Session = Depends(db_session),
+) -> dict:
+    """Why is today what it is: signed driver deviations + a plain headline."""
+    from ..queries import attribution
+
+    day = _date.fromisoformat(date) if date else _latest_date(db)
+    return attribution(db, day)
+
+
 COVERAGE_METRICS = [
     "recovery_score",
     "hrv_rmssd",
@@ -305,6 +329,16 @@ def coverage(
 
 
 # -- serializers ------------------------------------------------------------
+def _latest_date_any(db: Session) -> _date:
+    """Max date with any metric — the same anchor metric_series uses, so all
+    padded trend axes line up across metrics."""
+    from sqlalchemy import func
+
+    from ..models import DailyMetric
+
+    return db.scalar(select(func.max(DailyMetric.date))) or _date.today()
+
+
 def _latest_date(db: Session) -> _date:
     from sqlalchemy import func
 

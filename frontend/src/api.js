@@ -21,5 +21,7 @@ export const api = {
     get(`/api/events?days=${days}${type ? `&event_type=${type}` : ""}`),
   correlations: (days) => get(`/api/correlations?days=${days}`),
   coverage: (days) => get(`/api/coverage?days=${days}`),
+  calendar: (days) => get(`/api/calendar?days=${days}`),
+  attribution: (date) => get(`/api/attribution${date ? `?date=${date}` : ""}`),
   syncLog: () => get("/api/sync-log"),
 };
