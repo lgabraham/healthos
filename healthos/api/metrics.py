@@ -21,7 +21,7 @@ from ..models import CalendarEvent, DailyEvent, SleepSession, SyncLog, Workout
 from ..queries import (
     MIN_INFERENCE_DAYS,
     best_available,
-    canonical_sleep,
+    best_available_sleep,
     data_day_count,
     latest_workout,
     metric_series,
@@ -97,7 +97,7 @@ def daily(
             "delta_pct": delta,
         }
 
-    sleep = canonical_sleep(db, day)
+    sleep = best_available_sleep(db, day)
     last_wk = latest_workout(db, day)
     events = db.scalars(select(DailyEvent).where(DailyEvent.date == day)).all()
 
@@ -243,13 +243,11 @@ def _latest_date(db: Session) -> _date:
 
     from ..models import DailyMetric
 
-    # Prefer the latest day with a recovery score (Whoop's daily anchor) so the
-    # view lands on a *complete* day, not a partial "today" that only has an
-    # accumulating strain value.
+    # Latest *complete night*: a day with an HRV reading from ANY source (so a
+    # recent Eight Sleep night counts, not just Whoop), which avoids landing on
+    # a partial "today" that only has an accumulating strain value.
     anchor = db.scalar(
-        select(func.max(DailyMetric.date)).where(
-            DailyMetric.metric == "recovery_score", DailyMetric.is_canonical.is_(True)
-        )
+        select(func.max(DailyMetric.date)).where(DailyMetric.metric == "hrv_rmssd")
     )
     return anchor or db.scalar(select(func.max(DailyMetric.date))) or _date.today()
 

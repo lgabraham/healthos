@@ -158,6 +158,19 @@ def canonical_sleep(session: Session, day: _date) -> SleepSession | None:
     ).first()
 
 
+def best_available_sleep(session: Session, day: _date) -> SleepSession | None:
+    """Canonical (Whoop) sleep if present, else the most recent session from any
+    source for the day — so the pod's sleep shows when Whoop has a gap."""
+    canon = canonical_sleep(session, day)
+    if canon is not None:
+        return canon
+    return session.scalars(
+        select(SleepSession)
+        .where(SleepSession.date == day)
+        .order_by(SleepSession.created_at.desc())
+    ).first()
+
+
 def latest_workout(session: Session, on_or_before: _date) -> Workout | None:
     return session.scalars(
         select(Workout)
