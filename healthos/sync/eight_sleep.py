@@ -194,6 +194,13 @@ def normalize(sessions: list[dict]) -> tuple[list[SleepRecord], list[MetricPoint
         tnt_values = _series_values(ts, "tnt")
         toss = sum(tnt_values) if tnt_values else (interval.get("tnt") or None)
 
+        # Cardiac signals from the pod's timeseries — stored NON-canonically
+        # (Whoop owns HRV/RHR) so they can serve as a labeled fallback when
+        # Whoop has a gap. rmssd ~ HRV; resting HR ~ the night's low.
+        hrv = _avg(_series_values(ts, "rmssd"))
+        hr_series = _series_values(ts, "heartRate")
+        resting_hr = round(min(hr_series)) if hr_series else None
+
         sleeps.append(
             SleepRecord(
                 date=d,
@@ -209,15 +216,18 @@ def normalize(sessions: list[dict]) -> tuple[list[SleepRecord], list[MetricPoint
                 raw_json=interval,  # preserves temperature series for sauna inference
             )
         )
+        units = {"toss_turn_count": "count", "hrv_rmssd": "ms", "resting_hr": "bpm"}
         for metric, value in [
             ("bed_temp", bed_temp),
             ("skin_temp", skin_temp),
             ("room_temp", room_temp),
             ("toss_turn_count", toss),
+            ("hrv_rmssd", hrv),  # non-canonical (Whoop wins) -> serves as fallback
+            ("resting_hr", resting_hr),  # non-canonical fallback
         ]:
             if value is not None:
-                unit = "count" if metric == "toss_turn_count" else "celsius"
-                points.append(MetricPoint(d, metric, float(value), unit, SOURCE, None))
+                points.append(MetricPoint(d, metric, float(value), units.get(metric, "celsius"),
+                                          SOURCE, None))
     return sleeps, points
 
 

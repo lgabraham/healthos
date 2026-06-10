@@ -20,8 +20,8 @@ from ..database import db_session
 from ..models import CalendarEvent, DailyEvent, SleepSession, SyncLog, Workout
 from ..queries import (
     MIN_INFERENCE_DAYS,
+    best_available,
     canonical_sleep,
-    canonical_value,
     data_day_count,
     latest_workout,
     metric_series,
@@ -76,17 +76,25 @@ def daily(
 
     metrics = {}
     for metric, unit in DAILY_METRICS.items():
-        value = canonical_value(db, day, metric)
+        resolved = best_available(db, day, metric)
+        value = resolved.value
         base = rolling_baseline(db, metric, day)
+        # A fallback value comes from a different instrument than the canonical
+        # baseline, so suppress the (misleading) delta in that case.
+        delta = (
+            round((value - base.mean) / base.mean * 100, 1)
+            if value is not None and base.mean and not resolved.is_fallback
+            else None
+        )
         metrics[metric] = {
             "value": value,
             "unit": unit,
+            "source": resolved.source,
+            "is_fallback": resolved.is_fallback,
             "baseline": round(base.mean, 1) if base.mean is not None else None,
             "baseline_n": base.n,
             "baseline_trustworthy": base.trustworthy,
-            "delta_pct": round((value - base.mean) / base.mean * 100, 1)
-            if value is not None and base.mean
-            else None,
+            "delta_pct": delta,
         }
 
     sleep = canonical_sleep(db, day)

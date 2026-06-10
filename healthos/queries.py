@@ -47,6 +47,40 @@ def canonical_value(session: Session, day: _date, metric: str) -> float | None:
     return float(val) if val is not None else None
 
 
+@dataclass
+class Resolved:
+    value: float | None
+    source: str | None
+    is_fallback: bool
+
+
+def best_available(session: Session, day: _date, metric: str) -> Resolved:
+    """Canonical reading if present, else fall back to any other source for the
+    day — carrying provenance so the UI can label a fallback (e.g. HRV via
+    Eight Sleep when Whoop has a gap)."""
+    canon = session.execute(
+        select(DailyMetric.value, DailyMetric.source)
+        .where(
+            DailyMetric.date == day,
+            DailyMetric.metric == metric,
+            DailyMetric.is_canonical.is_(True),
+        )
+        .limit(1)
+    ).first()
+    if canon is not None:
+        return Resolved(float(canon[0]), canon[1], False)
+
+    other = session.execute(
+        select(DailyMetric.value, DailyMetric.source)
+        .where(DailyMetric.date == day, DailyMetric.metric == metric)
+        .order_by(DailyMetric.created_at.desc())
+        .limit(1)
+    ).first()
+    if other is not None:
+        return Resolved(float(other[0]), other[1], True)
+    return Resolved(None, None, False)
+
+
 def sick_dates(session: Session, end: _date, window_days: int = BASELINE_WINDOW_DAYS) -> set[_date]:
     """Dates flagged ``sick`` within the window, to exclude from baselines."""
     start = end - timedelta(days=window_days)

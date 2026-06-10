@@ -81,6 +81,14 @@ def test_fetch_and_normalize_intervals():
                                 ["2023-02-12T05:00:00.000Z", 21.37],
                             ],
                             "tempRoomC": [["2023-02-12T05:00:00.000Z", 17.7]],
+                            "rmssd": [
+                                ["2023-02-12T06:00:00.000Z", 30.0],
+                                ["2023-02-12T07:00:00.000Z", 40.0],
+                            ],
+                            "heartRate": [
+                                ["2023-02-12T06:00:00.000Z", 52.0],
+                                ["2023-02-12T07:00:00.000Z", 48.0],
+                            ],
                         },
                     }
                 ]
@@ -103,6 +111,8 @@ def test_fetch_and_normalize_intervals():
     assert by_metric["toss_turn_count"] == 2  # summed from the tnt series
     assert round(by_metric["bed_temp"], 2) == 19.99  # avg(18.61, 21.37)
     assert "room_temp" in by_metric
+    assert by_metric["hrv_rmssd"] == 35.0  # avg(30, 40) — non-canonical fallback
+    assert by_metric["resting_hr"] == 48.0  # min of the HR series
 
 
 def test_missing_credentials_raise(monkeypatch):

@@ -12,7 +12,9 @@ export default function MetricStat({ label, metric, unit, digits = 0, spark }) {
         {unit && <span className="unit">{unit}</span>}
       </div>
       <div className="metric-sub">
-        {metric?.baseline != null ? (
+        {metric?.is_fallback ? (
+          <span style={{ color: "var(--accent)" }}>via {metric.source} (fallback)</span>
+        ) : metric?.baseline != null ? (
           <>
             base {num(metric.baseline, digits)}{" "}
             <span className={deltaClass(metric.delta_pct)}>{deltaLabel(metric.delta_pct)}</span>
