@@ -35,6 +35,8 @@ CANONICAL_METRIC_SOURCE: dict[str, str] = {
     "vo2_max": GARMIN,
     "training_load": GARMIN,
     "tss": GARMIN,
+    "body_battery": GARMIN,
+    "stress_avg": GARMIN,
     # Phone is carried everywhere, so it's the better step counter than a
     # sometimes-worn watch — Apple Health wins; Garmin steps become a fallback.
     "steps": APPLE_HEALTH,
@@ -48,6 +50,21 @@ CANONICAL_METRIC_SOURCE: dict[str, str] = {
 
 # Which source is canonical for whole sleep *sessions* (architecture/staging).
 CANONICAL_SLEEP_SESSION_SOURCE = WHOOP
+
+# When several NON-canonical sources report the same metric on the same day,
+# pick the fallback deterministically so a re-sync never flips the displayed
+# value. Order reflects sensor suitability for the metrics that actually
+# overlap (HRV/RHR/sleep): the dedicated all-night pod beats the wrist beats
+# the phone. (The canonical source is chosen first, before this ever applies.)
+FALLBACK_PRIORITY = (WHOOP, EIGHT_SLEEP, GARMIN, APPLE_HEALTH)
+
+
+def source_rank(source: str) -> int:
+    """Lower = preferred when breaking ties between fallback sources."""
+    try:
+        return FALLBACK_PRIORITY.index(source)
+    except ValueError:
+        return len(FALLBACK_PRIORITY)
 
 
 def is_canonical_metric(metric: str, source: str) -> bool:

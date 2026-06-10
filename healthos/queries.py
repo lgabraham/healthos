@@ -11,10 +11,19 @@ from dataclasses import dataclass
 from datetime import date as _date
 from datetime import timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
+from .canonical import FALLBACK_PRIORITY, source_rank
 from .models import DailyEvent, DailyMetric, SleepSession, Workout
+
+
+def _source_rank_expr():
+    """SQL expression mirroring ``canonical.source_rank`` for ORDER BY."""
+    return case(
+        *[(DailyMetric.source == s, i) for i, s in enumerate(FALLBACK_PRIORITY)],
+        else_=len(FALLBACK_PRIORITY),
+    )
 
 BASELINE_WINDOW_DAYS = 30
 MIN_BASELINE_DAYS = 30  # below this we flag baselines as not-yet-trustworthy
@@ -70,15 +79,16 @@ def best_available(session: Session, day: _date, metric: str) -> Resolved:
     if canon is not None:
         return Resolved(float(canon[0]), canon[1], False)
 
-    other = session.execute(
-        select(DailyMetric.value, DailyMetric.source)
-        .where(DailyMetric.date == day, DailyMetric.metric == metric)
-        .order_by(DailyMetric.created_at.desc())
-        .limit(1)
-    ).first()
-    if other is not None:
-        return Resolved(float(other[0]), other[1], True)
-    return Resolved(None, None, False)
+    rows = session.execute(
+        select(DailyMetric.value, DailyMetric.source).where(
+            DailyMetric.date == day, DailyMetric.metric == metric
+        )
+    ).all()
+    if not rows:
+        return Resolved(None, None, False)
+    # Deterministic fallback: best-ranked source wins (not whichever synced last).
+    value, src = min(rows, key=lambda r: source_rank(r[1]))
+    return Resolved(float(value), src, True)
 
 
 def sick_dates(session: Session, end: _date, window_days: int = BASELINE_WINDOW_DAYS) -> set[_date]:
@@ -255,6 +265,7 @@ def metric_series(
         .order_by(
             DailyMetric.date.asc(),
             DailyMetric.is_canonical.desc(),
+            _source_rank_expr().asc(),
             DailyMetric.created_at.desc(),
         )
         .distinct(DailyMetric.date)

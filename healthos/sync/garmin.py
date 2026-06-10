@@ -110,7 +110,37 @@ def normalize_daily(day: _date, summary: dict | None) -> list[MetricPoint]:
     steps = summary.get("totalSteps")
     if steps is not None:
         points.append(MetricPoint(day, "steps", float(steps), "steps", SOURCE, summary))
+    # Resting HR rides along in the daily summary — a free fallback that fills
+    # RHR gaps on days Whoop didn't record (it's non-canonical; Whoop wins).
+    rhr = summary.get("restingHeartRate")
+    if rhr is not None and rhr > 0:
+        points.append(MetricPoint(day, "resting_hr", float(rhr), "bpm", SOURCE, None))
+    # Garmin-only context metrics (canonical for these — no other source has them).
+    bb = summary.get("bodyBatteryMostRecentValue")
+    if bb is not None and bb >= 0:
+        points.append(MetricPoint(day, "body_battery", float(bb), "score", SOURCE, None))
+    stress = summary.get("averageStressLevel")
+    # Garmin sends -1/-2 sentinels when a day has no stress reading.
+    if stress is not None and stress >= 0:
+        points.append(MetricPoint(day, "stress_avg", float(stress), "score", SOURCE, None))
     return points
+
+
+def normalize_hrv(day: _date, data: dict | None) -> list[MetricPoint]:
+    """Overnight HRV (rmssd-based) from Garmin's hrv-service.
+
+    ``lastNightAvg`` is the average for the night that ended on ``day`` — same
+    "the night that ended this morning" convention the rest of HealthOS uses,
+    so it lines up with Whoop/Eight Sleep HRV. Non-canonical (Whoop wins), so
+    it transparently fills HRV gaps when Whoop has none.
+    """
+    if not data:
+        return []
+    summary = data.get("hrvSummary") or {}
+    avg = summary.get("lastNightAvg")
+    if avg is None:
+        return []
+    return [MetricPoint(day, "hrv_rmssd", float(avg), "ms", SOURCE, None)]
 
 
 def normalize_vo2max_range(entries: list[dict]) -> list[MetricPoint]:
@@ -217,6 +247,7 @@ def pull(start_date: _date, end_date: _date, client: GarminClient | None = None)
     day = start_date
     while day <= end_date:
         metrics += normalize_daily(day, client.daily_summary(day))
+        metrics += normalize_hrv(day, client.hrv(day))
         # Training status per-day only on short syncs; else just the final day.
         if span_days <= 7 or day == end_date:
             metrics += normalize_training_status(day, client.training_status(day))
