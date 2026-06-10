@@ -31,6 +31,7 @@ class Correlation:
     points: list[dict]
     interpretation: str
     lag_days: int = 0
+    degenerate: bool = False  # zero variance in x — a scatter would be a lie
 
     def to_dict(self) -> dict:
         return {
@@ -41,6 +42,7 @@ class Correlation:
             "n": self.n,
             "points": self.points,
             "interpretation": self.interpretation,
+            "degenerate": self.degenerate,
         }
 
 
@@ -133,14 +135,25 @@ def correlate_event_to_metric_delta(
         day += timedelta(days=1)
 
     r = pearson(xs, ys)
+    n_events = sum(1 for x in xs if x == 1.0)
+    degenerate = len(xs) > 0 and (n_events == 0 or n_events == len(xs))
+    if degenerate:
+        nice = event_type.replace("_", " ")
+        interpretation = (
+            f"No {nice} events inferred in this window, so there is nothing to "
+            f"correlate yet. Sync sources, then run `healthos infer` to (re)detect events."
+        )
+    else:
+        interpretation = interpret_r(r, len(xs))
     return Correlation(
         metric_a=event_type,
         metric_b=f"{metric}_delta",
         r=r,
         n=len(xs),
         points=points,
-        interpretation=interpret_r(r, len(xs)),
+        interpretation=interpretation,
         lag_days=lag_days,
+        degenerate=degenerate,
     )
 
 

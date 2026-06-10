@@ -11,9 +11,16 @@ import {
 import { api } from "../api.js";
 import { useHealthData } from "../hooks/useHealthData.js";
 
-// "Why is today what it is" — signed deviations from personal baselines.
-// Positive (amber) = helping recovery; negative (red) = dragging it down.
+// "Why is today what it is" — each bar is the metric's SIGNED DEVIATION from
+// its own 30-day baseline (left = below your normal, right = above), while
+// COLOR says what that means for recovery (amber = helps, red = hurts,
+// gray = neutral, e.g. strain). One axis semantic, one color semantic.
 const AXIS = { stroke: "#3f3f46", fontSize: 11, fontFamily: "IBM Plex Mono" };
+
+function barColor(d) {
+  if (d.neutral) return "#52525b";
+  return d.pct >= 0 ? "#f59e0b" : "#ef4444";
+}
 
 export default function AttributionPanel({ date }) {
   const { data, loading, error } = useHealthData(() => api.attribution(date), [date]);
@@ -24,7 +31,7 @@ export default function AttributionPanel({ date }) {
     return (
       <div className="panel">
         <div className="label">Why today</div>
-        <div className="metric-sub">Not enough baseline data to attribute yet.</div>
+        <div className="metric-sub">{data?.reason || "Nothing to attribute for this day."}</div>
       </div>
     );
   }
@@ -58,7 +65,9 @@ export default function AttributionPanel({ date }) {
             tickLine={false}
             axisLine={AXIS}
             unit="%"
-            domain={["auto", "auto"]}
+            // Always include 0 and at least ±5%, so "close to baseline" LOOKS
+            // close to baseline instead of bars pinned across a 0.7–3.5% axis.
+            domain={[(dataMin) => Math.min(-5, Math.floor(dataMin)), (dataMax) => Math.max(5, Math.ceil(dataMax))]}
           />
           <YAxis
             type="category"
@@ -78,22 +87,23 @@ export default function AttributionPanel({ date }) {
               fontSize: 12,
             }}
             formatter={(v, _n, { payload }) => [
-              `${v > 0 ? "+" : ""}${v}% (now ${payload.value} vs base ${payload.baseline})`,
+              `${v > 0 ? "+" : ""}${v}% vs base ${payload.baseline} (now ${payload.value}) — ${
+                payload.neutral ? "neutral" : payload.pct >= 0 ? "helps recovery" : "drags recovery"
+              }`,
               payload.label,
             ]}
           />
-          <Bar dataKey="pct" isAnimationActive={false} barSize={14}>
+          <Bar dataKey="deviation_pct" isAnimationActive={false} barSize={14}>
             {rows.map((d) => (
-              <Cell
-                key={d.key}
-                fill={d.pct >= 0 ? "#f59e0b" : "#ef4444"}
-                opacity={d.is_fallback ? 0.55 : 1}
-              />
+              <Cell key={d.key} fill={barColor(d)} opacity={d.is_fallback ? 0.55 : 1} />
             ))}
           </Bar>
         </BarChart>
       </ResponsiveContainer>
-      <div className="metric-sub">deviation from your 30d baseline · + helps recovery · * fallback source</div>
+      <div className="metric-sub">
+        bar = deviation from your 30d baseline · color: amber helps recovery, red hurts, gray
+        neutral · * fallback source
+      </div>
     </div>
   );
 }

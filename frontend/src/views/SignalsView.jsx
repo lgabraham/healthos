@@ -45,7 +45,7 @@ function EventDot(props) {
       cy={cy}
       r={5}
       fill={CAT_COLOR[payload.evt] || CAT_COLOR.other}
-      stroke="#0a0a0a"
+      stroke="#e5e5e5"
       strokeWidth={1.5}
     />
   );
@@ -89,15 +89,14 @@ function Panel({ data, unit, color, height, smooth, children }) {
         <XAxis dataKey="date" tick={AXIS} minTickGap={28} tickLine={false} axisLine={AXIS} />
         <YAxis tick={AXIS} width={42} tickLine={false} axisLine={AXIS} domain={["auto", "auto"]} />
         <Tooltip content={<PanelTooltip unit={unit} color={color} />} />
-        {/* raw trace: faint when smoothing, prominent when not */}
+        {/* raw trace: faint when smoothing, prominent when not; breaks at gaps */}
         <Line
-          type="monotone"
+          type="linear"
           dataKey={unit}
           stroke={color}
           strokeWidth={smooth ? 1 : 2}
           strokeOpacity={smooth ? 0.3 : 1}
           dot={false}
-          connectNulls
           isAnimationActive={false}
         />
         {smooth && (
@@ -225,6 +224,7 @@ export default function SignalsView() {
                 font: "inherit",
                 color: "inherit",
                 opacity: cats.has(c) ? 1 : 0.3,
+                textDecoration: cats.has(c) ? "none" : "line-through",
               }}
               title={cats.has(c) ? `hide ${c} events` : `show ${c} events`}
             >

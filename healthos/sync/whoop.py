@@ -208,12 +208,20 @@ def _local_date(iso_ts: str | None) -> _date | None:
     return dt.astimezone(settings.tz).date()
 
 
+def _scored(rec: dict) -> bool:
+    """Whoop marks unsynced/unscorable records via score_state; ingesting their
+    zeroed score objects is how '0.0 strain' days were born. Lenient when the
+    field is absent (older payloads)."""
+    state = rec.get("score_state")
+    return state is None or state == "SCORED"
+
+
 def normalize_recovery(records: list[dict]) -> list[MetricPoint]:
     points: list[MetricPoint] = []
     for rec in records:
         d = _local_date(rec.get("created_at"))
         score = rec.get("score") or {}
-        if d is None or not score:
+        if d is None or not score or not _scored(rec):
             continue
         mapping = {
             "hrv_rmssd": (score.get("hrv_rmssd_milli"), "ms"),
@@ -234,10 +242,10 @@ def normalize_sleep(records: list[dict]) -> tuple[list[SleepRecord], list[Metric
         if rec.get("nap"):
             continue
         d = _local_date(rec.get("end"))
+        if d is None or not _scored(rec):
+            continue
         score = rec.get("score") or {}
         stage = score.get("stage_summary") or {}
-        if d is None:
-            continue
         rem = _ms_to_min(stage.get("total_rem_sleep_time_milli"))
         deep = _ms_to_min(stage.get("total_slow_wave_sleep_time_milli"))
         light = _ms_to_min(stage.get("total_light_sleep_time_milli"))
@@ -310,6 +318,8 @@ def normalize_cycles(records: list[dict]) -> list[MetricPoint]:
     points: list[MetricPoint] = []
     for rec in records:
         d = _local_date(rec.get("start"))
+        if not _scored(rec):
+            continue
         score = rec.get("score") or {}
         strain = score.get("strain")
         if d is not None and strain is not None:

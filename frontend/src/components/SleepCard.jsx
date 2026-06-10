@@ -23,7 +23,7 @@ export default function SleepCard({ sleep }) {
       <div className="label">Sleep</div>
       <div className="metric-value">
         {hm(sleep.total_minutes)}
-        {sleep.sleep_score != null && <span className="unit">score {num(sleep.sleep_score)}</span>}
+        {!!sleep.sleep_score && <span className="unit">score {num(sleep.sleep_score)}</span>}
       </div>
       <div className="sleepbar">
         {segs.map((s) => (

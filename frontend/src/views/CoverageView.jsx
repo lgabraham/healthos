@@ -39,6 +39,18 @@ export default function CoverageView() {
         data coverage · last {dates.length} days · who filled each cell
       </div>
       <div className="panel" style={{ overflowX: "auto" }}>
+        <div className="cov-row" aria-hidden="true">
+          <span className="cov-label" />
+          <div className="cov-cells">
+            {dates.map((date) => (
+              <span key={date} className="cov-cell cov-tick">
+                {date.endsWith("-01")
+                  ? new Date(`${date}T00:00:00`).toLocaleString("en", { month: "short" })
+                  : ""}
+              </span>
+            ))}
+          </div>
+        </div>
         {metrics.map((metric) => (
           <div className="cov-row" key={metric}>
             <span className="cov-label">{LABELS[metric] || metric}</span>

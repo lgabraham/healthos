@@ -14,11 +14,21 @@ const AXIS = { stroke: "#3f3f46", fontSize: 11, fontFamily: "IBM Plex Mono" };
 // One correlation card: scatter plot + r + sample size + plain-language read.
 export default function CorrelationCard({ card }) {
   const points = card.points || [];
+  const degenerate = card.degenerate || card.r == null || points.length === 0;
+  if (degenerate) {
+    return (
+      <div className="panel">
+        <div className="label">{card.title}</div>
+        <div className="corr-r" style={{ marginBottom: "0.4rem" }}>r = —</div>
+        <div className="metric-sub">{card.interpretation}</div>
+      </div>
+    );
+  }
   return (
     <div className="panel">
       <div className="label">{card.title}</div>
       <div style={{ display: "flex", alignItems: "baseline", gap: "0.8rem" }}>
-        <span className="corr-r">r = {card.r == null ? "—" : card.r.toFixed(2)}</span>
+        <span className="corr-r">r = {card.r.toFixed(2)}</span>
         <span className="metric-sub">n = {card.n}</span>
       </div>
       <ResponsiveContainer width="100%" height={160}>

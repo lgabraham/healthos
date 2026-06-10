@@ -211,7 +211,7 @@ def normalize(sessions: list[dict]) -> tuple[list[SleepRecord], list[MetricPoint
                 deep_minutes=durations.get("deep"),
                 light_minutes=durations.get("light"),
                 awake_minutes=durations.get("awake"),
-                sleep_score=interval.get("score"),
+                sleep_score=interval.get("score") or None,  # 0 = unscored, not a bad night
                 stages_json={"stages": stages},
                 raw_json=interval,  # preserves temperature series for sauna inference
             )

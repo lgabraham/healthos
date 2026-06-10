@@ -27,9 +27,18 @@ function StatusLine() {
   );
 }
 
+function viewFromHash() {
+  const h = window.location.hash.replace("#", "");
+  return h in VIEWS ? h : "daily";
+}
+
 export default function App() {
-  const [view, setView] = useState("daily");
+  const [view, setView] = useState(viewFromHash);
   const Active = VIEWS[view].component;
+  const switchView = (key) => {
+    window.location.hash = key;
+    setView(key);
+  };
 
   return (
     <div className="app">
@@ -42,7 +51,7 @@ export default function App() {
             <button
               key={key}
               className={view === key ? "active" : ""}
-              onClick={() => setView(key)}
+              onClick={() => switchView(key)}
             >
               {label}
             </button>

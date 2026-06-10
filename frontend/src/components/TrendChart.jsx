@@ -50,7 +50,7 @@ function EventDot(props) {
   return <circle cx={cx} cy={cy} r={4} fill={payload.evtColor} stroke="#0a0a0a" strokeWidth={1} />;
 }
 
-export default function TrendChart({ series, events = [], height = 240, color = "#f59e0b" }) {
+export default function TrendChart({ series, events = [], height = 240, color = "#f59e0b", yFormat }) {
   // Bind events into the data rows (Scatter places reliably on a category
   // axis, unlike ReferenceDot) — the dot rides the value line for that day.
   const evtByDate = {};
@@ -73,10 +73,10 @@ export default function TrendChart({ series, events = [], height = 240, color = 
       <ComposedChart data={data} margin={{ top: 8, right: 12, bottom: 4, left: -8 }}>
         <CartesianGrid stroke="#1f1f1f" vertical={false} />
         <XAxis dataKey="date" tick={AXIS} minTickGap={28} axisLine={AXIS} tickLine={false} />
-        <YAxis tick={AXIS} axisLine={AXIS} tickLine={false} width={42} domain={["auto", "auto"]} />
+        <YAxis tick={AXIS} axisLine={AXIS} tickLine={false} width={48} domain={["auto", "auto"]} tickFormatter={yFormat} />
         <Tooltip content={<DarkTooltip />} />
         <Line
-          type="monotone"
+          type="linear"
           dataKey="value"
           stroke="#52525b"
           strokeWidth={1}

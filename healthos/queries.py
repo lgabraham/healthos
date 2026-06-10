@@ -29,6 +29,26 @@ BASELINE_WINDOW_DAYS = 30
 MIN_BASELINE_DAYS = 30  # below this we flag baselines as not-yet-trustworthy
 MIN_INFERENCE_DAYS = 14  # below this we suppress inference entirely (spec: "building baseline")
 
+# Metrics where a stored 0 can only mean "device produced a placeholder", not a
+# real reading (you cannot have 0 HRV or take 0 steps while alive and tracked).
+# Treated as missing at read time so historical zeros stop masquerading as data.
+ZERO_IS_MISSING = {
+    "hrv_rmssd",
+    "resting_hr",
+    "recovery_score",
+    "strain_score",
+    "sleep_duration_minutes",
+    "respiratory_rate",
+    "spo2",
+    "steps",
+}
+
+
+def _value_filter(metric: str, stmt):
+    if metric in ZERO_IS_MISSING:
+        return stmt.where(DailyMetric.value > 0)
+    return stmt
+
 
 @dataclass
 class Baseline:
@@ -52,7 +72,7 @@ def canonical_value(session: Session, day: _date, metric: str) -> float | None:
         )
         .limit(1)
     )
-    val = session.scalar(stmt)
+    val = session.scalar(_value_filter(metric, stmt))
     return float(val) if val is not None else None
 
 
@@ -68,20 +88,24 @@ def best_available(session: Session, day: _date, metric: str) -> Resolved:
     day — carrying provenance so the UI can label a fallback (e.g. HRV via
     Eight Sleep when Whoop has a gap)."""
     canon = session.execute(
-        select(DailyMetric.value, DailyMetric.source)
-        .where(
-            DailyMetric.date == day,
-            DailyMetric.metric == metric,
-            DailyMetric.is_canonical.is_(True),
-        )
-        .limit(1)
+        _value_filter(
+            metric,
+            select(DailyMetric.value, DailyMetric.source).where(
+                DailyMetric.date == day,
+                DailyMetric.metric == metric,
+                DailyMetric.is_canonical.is_(True),
+            ),
+        ).limit(1)
     ).first()
     if canon is not None:
         return Resolved(float(canon[0]), canon[1], False)
 
     rows = session.execute(
-        select(DailyMetric.value, DailyMetric.source).where(
-            DailyMetric.date == day, DailyMetric.metric == metric
+        _value_filter(
+            metric,
+            select(DailyMetric.value, DailyMetric.source).where(
+                DailyMetric.date == day, DailyMetric.metric == metric
+            ),
         )
     ).all()
     if not rows:
@@ -122,7 +146,7 @@ def rolling_baseline(
         DailyMetric.date >= start,
         DailyMetric.date < end,
     )
-    rows = session.execute(stmt).all()
+    rows = session.execute(_value_filter(metric, stmt)).all()
     excluded = sick_dates(session, end, window_days) if exclude_sick else set()
     values = [float(v) for d, v in rows if d not in excluded and v is not None]
     if not values:
@@ -154,7 +178,9 @@ def estimated_recovery(session: Session, day: _date) -> float | None:
 
 
 # (metric, label, day_offset, invert) — invert=True means "lower is better",
-# so the sign flips to read as helping(+)/dragging(-) recovery.
+# so the sign flips to read as helping(+)/dragging(-) recovery. Metrics in
+# NEUTRAL_DRIVERS have no universally "bad" direction (low strain is a rest
+# day, not a problem) and are excluded from the headline + colored neutrally.
 ATTRIBUTION_DRIVERS = [
     ("hrv_rmssd", "HRV", 0, False),
     ("resting_hr", "Resting HR", 0, True),
@@ -163,30 +189,43 @@ ATTRIBUTION_DRIVERS = [
     ("strain_score", "Yesterday's strain", 1, True),
     ("bed_temp", "Bed temp", 0, True),
 ]
+NEUTRAL_DRIVERS = {"strain_score"}
 
 
 def attribution(session: Session, day: _date) -> dict:
     """Decompose today's state into signed deviations from personal baselines.
 
-    Not a causal model of Whoop's score — each driver is the metric's deviation
-    from its own 30-day baseline, signed so positive = helping recovery. The
-    headline names the largest mover in plain language.
+    Each driver carries TWO numbers so the chart and the colors can mean
+    different (correct) things:
+      * ``deviation_pct`` — the raw signed deviation from the metric's own
+        baseline (what the bar axis shows: above/below YOUR normal).
+      * ``pct`` — that deviation signed as recovery impact (+ helps, − hurts),
+        used for color, sorting, and the headline.
+    Not a causal model of Whoop's score. When no drivers resolve, ``reason``
+    says WHY (no metrics that day vs. baselines not built yet).
     """
     drivers: list[dict] = []
+    missing_value = 0
+    missing_baseline = 0
     for metric, label, offset, invert in ATTRIBUTION_DRIVERS:
         target = day - timedelta(days=offset)
         resolved = best_available(session, target, metric)
         base = rolling_baseline(session, metric, target)
-        if resolved.value is None or not base.mean:
+        if resolved.value is None:
+            missing_value += 1
             continue
-        pct = (resolved.value / base.mean - 1.0) * 100.0
-        if invert:
-            pct = -pct
+        if not base.mean:
+            missing_baseline += 1
+            continue
+        deviation = (resolved.value / base.mean - 1.0) * 100.0
+        pct = -deviation if invert else deviation
         drivers.append(
             {
                 "key": metric,
                 "label": label,
                 "pct": round(pct, 1),
+                "deviation_pct": round(deviation, 1),
+                "neutral": metric in NEUTRAL_DRIVERS,
                 "value": round(resolved.value, 1),
                 "baseline": round(base.mean, 1),
                 "baseline_n": base.n,
@@ -197,8 +236,11 @@ def attribution(session: Session, day: _date) -> dict:
     drivers.sort(key=lambda d: abs(d["pct"]), reverse=True)
 
     headline = None
-    if drivers and abs(drivers[0]["pct"]) >= 5:
-        top = drivers[0]
+    # Headline only considers directional drivers — "strain is helping" reads
+    # like advice; "HRV is dragging" is the kind of claim we can stand behind.
+    directional = [d for d in drivers if not d["neutral"]]
+    if directional and abs(directional[0]["pct"]) >= 5:
+        top = directional[0]
         direction = "helping" if top["pct"] > 0 else "dragging"
         headline = (
             f"{top['label']} is today's biggest mover: {top['value']} vs your "
@@ -208,6 +250,13 @@ def attribution(session: Session, day: _date) -> dict:
     elif drivers:
         headline = "Everything is close to baseline today — steady as she goes."
 
+    reason = None
+    if not drivers:
+        if missing_value >= missing_baseline:
+            reason = "No metrics recorded for this day — check the Coverage tab for which source has a gap."
+        else:
+            reason = "Baselines aren't established yet — they need ~2 weeks of canonical data."
+
     events = session.scalars(
         select(DailyEvent).where(DailyEvent.date.in_([day, day - timedelta(days=1)]))
     ).all()
@@ -216,7 +265,7 @@ def attribution(session: Session, day: _date) -> dict:
         for e in events
     ]
     return {"date": day.isoformat(), "drivers": drivers, "headline": headline,
-            "events": event_notes}
+            "reason": reason, "events": event_notes}
 
 
 def data_day_count(session: Session) -> int:
@@ -252,7 +301,11 @@ def metric_series(
             )
             .order_by(DailyMetric.date.asc())
         )
-        return [(d, float(v)) for d, v in session.execute(stmt).all() if v is not None]
+        return [
+            (d, float(v))
+            for d, v in session.execute(_value_filter(metric, stmt)).all()
+            if v is not None
+        ]
 
     # One row per date: canonical first, else newest other source.
     stmt = (
@@ -270,7 +323,11 @@ def metric_series(
         )
         .distinct(DailyMetric.date)
     )
-    return [(d, float(v)) for d, v in session.execute(stmt).all() if v is not None]
+    return [
+        (d, float(v))
+        for d, v in session.execute(_value_filter(metric, stmt)).all()
+        if v is not None
+    ]
 
 
 def canonical_sleep(session: Session, day: _date) -> SleepSession | None:

@@ -40,6 +40,11 @@ body {
 
 /* Header / nav -------------------------------------------------------------*/
 .topbar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg, #0a0a0a);
+  padding-top: 0.5rem;
   display: flex;
   align-items: baseline;
   justify-content: space-between;
@@ -320,4 +325,13 @@ body {
   width: 9px;
   height: 16px;
   border-radius: 1px;
+}
+.cov-tick {
+  height: 12px;
+  background: none !important;
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  color: var(--muted);
+  overflow: visible;
+  white-space: nowrap;
 }

@@ -49,14 +49,32 @@ def _local(dt):
 
 @router.get("/status")
 def status(db: Session = Depends(db_session)) -> dict:
-    """Overall app/data readiness, incl. the 'building baseline' flag."""
+    """Overall app/data readiness, incl. per-source freshness for the
+    data-health banner (a stale Whoop quietly degrades half the app — say so)."""
+    from sqlalchemy import func
+
+    from ..models import DailyMetric
+
     days = data_day_count(db)
     last_sync = db.scalars(select(SyncLog).order_by(desc(SyncLog.synced_at)).limit(1)).first()
+    latest = _latest_date_any(db)
+    freshness = db.execute(
+        select(DailyMetric.source, func.max(DailyMetric.date)).group_by(DailyMetric.source)
+    ).all()
+    sources = {
+        src: {
+            "last_data_date": d.isoformat(),
+            "days_behind": (latest - d).days,
+        }
+        for src, d in freshness
+    }
     return {
         "data_days": days,
         "building_baseline": days < MIN_INFERENCE_DAYS,
         "min_days_for_inference": MIN_INFERENCE_DAYS,
         "timezone": settings.timezone,
+        "latest_data_date": latest.isoformat(),
+        "sources": sources,
         "last_sync": {
             "source": last_sync.source,
             "status": last_sync.status,
@@ -306,6 +324,9 @@ def coverage(
             DailyMetric.metric.in_(COVERAGE_METRICS),
             DailyMetric.date >= start,
             DailyMetric.date <= end,
+            # All coverage metrics are zero-impossible; a stored 0 is a
+            # placeholder, and showing it as covered would hide the real gap.
+            DailyMetric.value > 0,
         )
     ).all()
 

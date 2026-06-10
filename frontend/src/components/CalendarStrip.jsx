@@ -19,7 +19,7 @@ export default function CalendarStrip({ events, viewDate }) {
     return (
       <div className="panel">
         <div className="label">Calendar context</div>
-        <div className="metric-sub">No events (add a secret .ics URL to enable).</div>
+        <div className="metric-sub">No calendar events for this day or the evening before.</div>
       </div>
     );
   }
