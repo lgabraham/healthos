@@ -235,7 +235,15 @@ def _latest_date(db: Session) -> _date:
 
     from ..models import DailyMetric
 
-    return db.scalar(select(func.max(DailyMetric.date))) or _date.today()
+    # Prefer the latest day with a recovery score (Whoop's daily anchor) so the
+    # view lands on a *complete* day, not a partial "today" that only has an
+    # accumulating strain value.
+    anchor = db.scalar(
+        select(func.max(DailyMetric.date)).where(
+            DailyMetric.metric == "recovery_score", DailyMetric.is_canonical.is_(True)
+        )
+    )
+    return anchor or db.scalar(select(func.max(DailyMetric.date))) or _date.today()
 
 
 def _sleep_dict(s: SleepSession | None) -> dict | None:
