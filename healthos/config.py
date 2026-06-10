@@ -7,15 +7,20 @@ directly. Import the singleton ``settings`` (or call ``get_settings()``).
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Resolve .env relative to the project root, not the current working directory,
+# so the app loads the same config no matter where it's launched from.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", str(_PROJECT_ROOT / ".env")),
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
