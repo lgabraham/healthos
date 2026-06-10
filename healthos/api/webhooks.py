@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import date as _date
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
@@ -19,6 +19,18 @@ from ..database import db_session
 from ..models import DailyEvent
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
+
+
+def _parse_date(value: str) -> _date:
+    """Parse a YYYY-MM-DD date, returning a clear 400 instead of a 500."""
+    try:
+        return _date.fromisoformat(value.strip())
+    except (ValueError, AttributeError):
+        raise HTTPException(
+            status_code=400,
+            detail=f"'date' must be YYYY-MM-DD (got {value!r}). "
+            "If sending from a Shortcut, format Current Date as yyyy-MM-dd.",
+        ) from None
 
 
 class IOSEvent(BaseModel):
@@ -31,7 +43,7 @@ class IOSEvent(BaseModel):
 @router.post("/ios")
 def ios_shortcut(payload: IOSEvent, db: Session = Depends(db_session)) -> dict:
     """Accept a JSON event from an iOS Shortcut and upsert it as confirmed."""
-    day = _date.fromisoformat(payload.date)
+    day = _parse_date(payload.date)
     stmt = (
         pg_insert(DailyEvent)
         .values(
@@ -74,7 +86,7 @@ def ingest_metric(payload: MetricIngest, db: Session = Depends(db_session)) -> d
     """
     from ..sync.persistence import MetricPoint, upsert_metrics
 
-    day = _date.fromisoformat(payload.date)
+    day = _parse_date(payload.date)
     upsert_metrics(
         db, [MetricPoint(day, payload.metric, payload.value, payload.unit, payload.source)]
     )
