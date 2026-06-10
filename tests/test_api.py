@@ -94,3 +94,32 @@ def test_metric_webhook_tolerates_messy_date(session, client):
     r2 = client.post("/webhooks/metric", json={"metric": "steps", "value": 5000})
     assert r2.status_code == 200
     assert r2.json()["date"]  # a real date string
+
+
+def test_estimated_recovery_and_all_source_trend(session, client):
+    from datetime import date, timedelta
+    from healthos.sync.persistence import MetricPoint, upsert_metrics
+
+    base = date(2026, 3, 1)
+    pts = []
+    for i in range(30):  # build HRV/RHR baselines (whoop, canonical)
+        d = base + timedelta(days=i)
+        pts += [MetricPoint(d, "hrv_rmssd", 60.0, "ms", "whoop"),
+                MetricPoint(d, "resting_hr", 50.0, "bpm", "whoop")]
+    # A later day with only Eight Sleep HRV/RHR (non-canonical), no recovery.
+    target = base + timedelta(days=30)
+    pts += [MetricPoint(target, "hrv_rmssd", 72.0, "ms", "eight_sleep"),
+            MetricPoint(target, "resting_hr", 46.0, "bpm", "eight_sleep")]
+    upsert_metrics(session, pts)
+    session.commit()
+
+    d = client.get(f"/api/daily?date={target.isoformat()}").json()
+    rec = d["metrics"]["recovery_score"]
+    assert rec["is_estimated"] is True
+    assert rec["value"] > 60  # HRV above baseline -> good recovery
+    # HRV fallback (Eight Sleep) shows on the day.
+    assert d["metrics"]["hrv_rmssd"]["is_fallback"] is True
+
+    # Trend includes the non-canonical Eight Sleep point (extends past whoop).
+    t = client.get("/api/trend/hrv_rmssd?days=90").json()
+    assert any(p["value"] == 72.0 for p in t["series"])

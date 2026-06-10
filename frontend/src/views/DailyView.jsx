@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { api } from "../api.js";
 import { useHealthData } from "../hooks/useHealthData.js";
 import RecoveryScore from "../components/RecoveryScore.jsx";
@@ -7,8 +8,19 @@ import EventTimeline from "../components/EventTimeline.jsx";
 import CalendarStrip from "../components/CalendarStrip.jsx";
 import { hm, num } from "../format.js";
 
+function shiftDate(iso, days) {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function todayISO() {
+  return new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD, local time
+}
+
 export default function DailyView() {
-  const { data: daily, loading, error } = useHealthData(() => api.daily(), []);
+  const [date, setDate] = useState(null); // null = latest complete day (server picks)
+  const { data: daily, loading, error } = useHealthData(() => api.daily(date), [date]);
   const { data: hrvTrend } = useHealthData(() => api.trend("hrv_rmssd", 30, 7), []);
 
   if (loading) return <div className="muted mono">loading…</div>;
@@ -25,8 +37,23 @@ export default function DailyView() {
           BUILDING BASELINE — fewer than 14 days of data. Inference and baselines are provisional.
         </div>
       )}
-      <div className="statusline" style={{ marginBottom: "0.8rem" }}>
-        showing {daily.date}
+
+      <div className="datenav">
+        <button onClick={() => setDate(shiftDate(daily.date, -1))} aria-label="previous day">
+          ‹
+        </button>
+        <span className="mono">{daily.date}</span>
+        <button onClick={() => setDate(shiftDate(daily.date, 1))} aria-label="next day">
+          ›
+        </button>
+        <button className="ghost" onClick={() => setDate(todayISO())}>
+          today
+        </button>
+        {date && (
+          <button className="ghost" onClick={() => setDate(null)}>
+            latest
+          </button>
+        )}
       </div>
 
       <div className="grid cols-4">

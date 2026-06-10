@@ -120,6 +120,29 @@ def rolling_baseline(
     return Baseline(metric=metric, mean=sum(values) / len(values), n=len(values))
 
 
+def estimated_recovery(session: Session, day: _date) -> float | None:
+    """A Whoop-like recovery estimate (0-100) for days without a real score.
+
+    Heuristic: recovery rises with HRV above your baseline and resting HR below
+    it. Not Whoop's algorithm — a transparent stand-in so gap days aren't blank.
+    Uses best-available HRV/RHR (so an Eight Sleep night counts) and needs a
+    baseline to compare against.
+    """
+    hrv = best_available(session, day, "hrv_rmssd")
+    rhr = best_available(session, day, "resting_hr")
+    if hrv.value is None or rhr.value is None:
+        return None
+    hrv_base = rolling_baseline(session, "hrv_rmssd", day)
+    rhr_base = rolling_baseline(session, "resting_hr", day)
+    if not hrv_base.mean or not rhr_base.mean:
+        return None
+    hrv_ratio = hrv.value / hrv_base.mean  # >1 = better than baseline
+    rhr_ratio = rhr_base.mean / rhr.value  # >1 = better (lower RHR)
+    # Baseline maps to ~55; HRV weighted more heavily than RHR, like Whoop.
+    score = 55 + 70 * (hrv_ratio - 1) + 35 * (rhr_ratio - 1)
+    return round(max(1.0, min(99.0, score)), 1)
+
+
 def data_day_count(session: Session) -> int:
     """Distinct number of days we have any canonical metric for."""
     n = session.scalar(
@@ -133,9 +156,29 @@ def data_day_count(session: Session) -> int:
 def metric_series(
     session: Session, metric: str, days: int, canonical_only: bool = True
 ) -> list[tuple[_date, float]]:
-    """Trailing ``days`` of a metric as (date, value) ascending."""
+    """Trailing ``days`` of a metric as (date, value) ascending.
+
+    By default returns one value per date using the best-available source
+    (canonical preferred, otherwise the most recent other source), so trends
+    extend through the current day using all data — not just the canonical
+    device. Pass ``canonical_only=True`` to restrict to the canonical source.
+    """
     end = _today(session)
     start = end - timedelta(days=days)
+    if canonical_only:
+        stmt = (
+            select(DailyMetric.date, DailyMetric.value)
+            .where(
+                DailyMetric.metric == metric,
+                DailyMetric.date >= start,
+                DailyMetric.date <= end,
+                DailyMetric.is_canonical.is_(True),
+            )
+            .order_by(DailyMetric.date.asc())
+        )
+        return [(d, float(v)) for d, v in session.execute(stmt).all() if v is not None]
+
+    # One row per date: canonical first, else newest other source.
     stmt = (
         select(DailyMetric.date, DailyMetric.value)
         .where(
@@ -143,10 +186,13 @@ def metric_series(
             DailyMetric.date >= start,
             DailyMetric.date <= end,
         )
-        .order_by(DailyMetric.date.asc())
+        .order_by(
+            DailyMetric.date.asc(),
+            DailyMetric.is_canonical.desc(),
+            DailyMetric.created_at.desc(),
+        )
+        .distinct(DailyMetric.date)
     )
-    if canonical_only:
-        stmt = stmt.where(DailyMetric.is_canonical.is_(True))
     return [(d, float(v)) for d, v in session.execute(stmt).all() if v is not None]
 
 

@@ -266,3 +266,34 @@ body {
   font-weight: 600;
   color: var(--accent);
 }
+
+/* Daily date navigation -----------------------------------------------------*/
+.datenav {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+  font-family: var(--mono);
+}
+.datenav button {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.datenav button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.datenav button.ghost {
+  color: var(--muted);
+}
+.datenav span {
+  font-size: 0.88rem;
+  min-width: 6.5rem;
+  text-align: center;
+}

@@ -23,6 +23,7 @@ from ..queries import (
     best_available,
     best_available_sleep,
     data_day_count,
+    estimated_recovery,
     latest_workout,
     metric_series,
     rolling_baseline,
@@ -78,19 +79,28 @@ def daily(
     for metric, unit in DAILY_METRICS.items():
         resolved = best_available(db, day, metric)
         value = resolved.value
+        source = resolved.source
+        is_fallback = resolved.is_fallback
+        is_estimated = False
+        # When there's no real recovery score, estimate one from HRV + RHR.
+        if metric == "recovery_score" and value is None:
+            est = estimated_recovery(db, day)
+            if est is not None:
+                value, source, is_estimated = est, "estimated", True
         base = rolling_baseline(db, metric, day)
-        # A fallback value comes from a different instrument than the canonical
-        # baseline, so suppress the (misleading) delta in that case.
+        # A fallback/estimated value isn't comparable to the canonical baseline,
+        # so suppress the (misleading) delta in those cases.
         delta = (
             round((value - base.mean) / base.mean * 100, 1)
-            if value is not None and base.mean and not resolved.is_fallback
+            if value is not None and base.mean and not is_fallback and not is_estimated
             else None
         )
         metrics[metric] = {
             "value": value,
             "unit": unit,
-            "source": resolved.source,
-            "is_fallback": resolved.is_fallback,
+            "source": source,
+            "is_fallback": is_fallback,
+            "is_estimated": is_estimated,
             "baseline": round(base.mean, 1) if base.mean is not None else None,
             "baseline_n": base.n,
             "baseline_trustworthy": base.trustworthy,
@@ -139,8 +149,12 @@ def trend(
     rolling: int = Query(default=7, ge=1, le=60),
     db: Session = Depends(db_session),
 ) -> dict:
-    """Time series for a metric with a rolling average + event markers."""
-    series = metric_series(db, metric, days)
+    """Time series for a metric with a rolling average + event markers.
+
+    Uses the best-available source per day (not just canonical), so the line
+    extends through the current day wherever any device has data.
+    """
+    series = metric_series(db, metric, days, canonical_only=False)
     enriched = rolling_average(series, rolling)
     event_rows = db.scalars(
         select(DailyEvent).where(DailyEvent.date >= _date.today() - timedelta(days=days))

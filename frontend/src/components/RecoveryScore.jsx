@@ -18,8 +18,14 @@ export default function RecoveryScore({ metric }) {
         <span className="unit">%</span>
       </div>
       <div className="metric-sub">
-        {metric?.baseline != null ? `30d avg ${num(metric.baseline)}%` : "no baseline yet"}
-        {metric && !metric.baseline_trustworthy ? " · building baseline" : ""}
+        {metric?.is_estimated ? (
+          <span style={{ color: "var(--accent)" }}>estimated from HRV + RHR</span>
+        ) : (
+          <>
+            {metric?.baseline != null ? `30d avg ${num(metric.baseline)}%` : "no baseline yet"}
+            {metric && !metric.baseline_trustworthy ? " · building baseline" : ""}
+          </>
+        )}
       </div>
     </div>
   );
