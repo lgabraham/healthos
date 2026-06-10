@@ -209,9 +209,9 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--days", type=int, default=1)
     s.add_argument(
         "--source",
-        choices=["whoop", "garmin", "eight_sleep"],
+        choices=["whoop", "garmin", "eight_sleep", "calendar"],
         default=None,
-        help="sync a single provider (default: all)",
+        help="sync a single source (default: all)",
     )
     s.set_defaults(func=_cmd_sync)
 
