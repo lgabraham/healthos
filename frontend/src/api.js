@@ -24,4 +24,5 @@ export const api = {
   calendar: (days) => get(`/api/calendar?days=${days}`),
   attribution: (date) => get(`/api/attribution${date ? `?date=${date}` : ""}`),
   syncLog: () => get("/api/sync-log"),
+  concordance: (metric, days) => get(`/api/concordance?metric=${metric}&days=${days}`),
 };

@@ -216,7 +216,12 @@ def normalize(sessions: list[dict]) -> tuple[list[SleepRecord], list[MetricPoint
                 raw_json=interval,  # preserves temperature series for sauna inference
             )
         )
-        units = {"toss_turn_count": "count", "hrv_rmssd": "ms", "resting_hr": "bpm"}
+        units = {
+            "toss_turn_count": "count",
+            "hrv_rmssd": "ms",
+            "resting_hr": "bpm",
+            "sleep_duration_minutes": "minutes",
+        }
         for metric, value in [
             ("bed_temp", bed_temp),
             ("skin_temp", skin_temp),
@@ -224,6 +229,7 @@ def normalize(sessions: list[dict]) -> tuple[list[SleepRecord], list[MetricPoint
             ("toss_turn_count", toss),
             ("hrv_rmssd", hrv),  # non-canonical (Whoop wins) -> serves as fallback
             ("resting_hr", resting_hr),  # non-canonical fallback
+            ("sleep_duration_minutes", durations.get("total")),  # fallback + concordance
         ]:
             if value is not None:
                 points.append(MetricPoint(d, metric, float(value), units.get(metric, "celsius"),

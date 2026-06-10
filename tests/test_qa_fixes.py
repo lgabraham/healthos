@@ -113,3 +113,26 @@ def test_degenerate_correlation_flagged(session, client):
     sauna = next(c for c in cards if "Sauna" in c["title"])
     assert sauna["degenerate"] is True
     assert "healthos infer" in sauna["interpretation"]
+
+
+def test_concordance_endpoint(session, client):
+    """Whoop vs Eight Sleep on shared nights: offset + correlation."""
+    for i in range(10):
+        d = DAY - timedelta(days=i)
+        session.add(DailyMetric(date=d, metric="hrv_rmssd", value=34 + i % 4, unit="ms",
+                                source="whoop", is_canonical=True))
+        # Pod reads consistently ~10ms higher on the same nights.
+        session.add(DailyMetric(date=d, metric="hrv_rmssd", value=44 + i % 4, unit="ms",
+                                source="eight_sleep", is_canonical=False))
+    # One whoop-only travel night.
+    session.add(DailyMetric(date=DAY - timedelta(days=11), metric="hrv_rmssd", value=30,
+                            unit="ms", source="whoop", is_canonical=True))
+    session.commit()
+    body = client.get("/api/concordance?metric=hrv_rmssd&days=30").json()
+    assert body["n_overlap"] == 10
+    assert body["median_offset"] == 10.0
+    assert body["r"] == 1.0
+    assert body["n_whoop"] == 11
+
+    bad = client.get("/api/concordance?metric=bogus&days=30").json()
+    assert "error" in bad

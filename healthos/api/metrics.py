@@ -296,6 +296,60 @@ def attribution_endpoint(
     return attribution(db, day)
 
 
+CONCORDANCE_METRICS = {"hrv_rmssd", "resting_hr", "sleep_duration_minutes"}
+
+
+@router.get("/concordance")
+def concordance(
+    metric: str = Query(default="hrv_rmssd"),
+    days: int = Query(default=60, ge=7, le=365),
+    db: Session = Depends(db_session),
+) -> dict:
+    """Whoop vs Eight Sleep, same metric, same nights.
+
+    Quantifies the instrument offset so fallback values can be read honestly
+    (the pod tends to read HRV higher than the strap), and makes one-off
+    divergent nights (sensor moved / partner in bed) visible as outliers.
+    """
+    from statistics import median
+
+    from ..models import DailyMetric
+    from ..stats import pearson
+
+    if metric not in CONCORDANCE_METRICS:
+        return {"error": f"metric must be one of {sorted(CONCORDANCE_METRICS)}"}
+    end = _latest_date_any(db)
+    start = end - timedelta(days=days)
+    rows = db.execute(
+        select(DailyMetric.date, DailyMetric.source, DailyMetric.value).where(
+            DailyMetric.metric == metric,
+            DailyMetric.source.in_(["whoop", "eight_sleep"]),
+            DailyMetric.date >= start,
+            DailyMetric.date <= end,
+            DailyMetric.value > 0,
+        )
+    ).all()
+    by_date: dict[str, dict] = {}
+    for d, src, v in rows:
+        by_date.setdefault(d.isoformat(), {"date": d.isoformat()})[src] = float(v)
+    series = sorted(by_date.values(), key=lambda r: r["date"])
+
+    pairs = [(r["whoop"], r["eight_sleep"]) for r in series if "whoop" in r and "eight_sleep" in r]
+    diffs = [es - w for w, es in pairs]
+    offset = round(median(diffs), 1) if diffs else None
+    r = pearson([p[0] for p in pairs], [p[1] for p in pairs])
+    return {
+        "metric": metric,
+        "days": days,
+        "series": series,
+        "n_whoop": sum(1 for r_ in series if "whoop" in r_),
+        "n_eight_sleep": sum(1 for r_ in series if "eight_sleep" in r_),
+        "n_overlap": len(pairs),
+        "median_offset": offset,  # eight_sleep minus whoop on shared nights
+        "r": round(r, 2) if r is not None else None,
+    }
+
+
 COVERAGE_METRICS = [
     "recovery_score",
     "hrv_rmssd",
