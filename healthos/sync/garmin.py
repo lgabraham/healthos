@@ -63,7 +63,11 @@ class GarminClient:
         try:
             return self._garth.connectapi(path, **kwargs)
         except Exception as exc:  # noqa: BLE001
-            log.warning("Garmin call failed for %s: %s", path, exc)
+            # Missing data for a day commonly 404s; not worth a warning each.
+            if "404" in str(exc):
+                log.debug("Garmin 404 for %s", path)
+            else:
+                log.warning("Garmin call failed for %s: %s", path, exc)
             return None
 
     # -- endpoints ---------------------------------------------------------
@@ -76,10 +80,12 @@ class GarminClient:
         result = self._connectapi(f"/hrv-service/hrv/{day.isoformat()}")
         return result if isinstance(result, dict) else None
 
-    def vo2max(self, day: _date) -> dict | None:
-        # Max metrics include VO2 max for running.
-        result = self._connectapi(f"/metrics-service/metrics/maxmet/daily/{day.isoformat()}")
-        return result if isinstance(result, dict) else None
+    def vo2max_range(self, start: _date, end: _date) -> list[dict]:
+        """Max metrics (incl. VO2 max) for a whole date range in ONE call."""
+        result = self._connectapi(
+            f"/metrics-service/metrics/maxmet/daily/{start.isoformat()}/{end.isoformat()}"
+        )
+        return result if isinstance(result, list) else []
 
     def training_status(self, day: _date) -> dict | None:
         result = self._connectapi(
@@ -107,14 +113,20 @@ def normalize_daily(day: _date, summary: dict | None) -> list[MetricPoint]:
     return points
 
 
-def normalize_vo2max(day: _date, data: dict | None) -> list[MetricPoint]:
-    if not data:
-        return []
-    generic = data.get("generic") or {}
-    vo2 = generic.get("vo2MaxPreciseValue") or generic.get("vo2MaxValue")
-    if vo2 is None:
-        return []
-    return [MetricPoint(day, "vo2_max", float(vo2), "ml/kg/min", SOURCE, data)]
+def normalize_vo2max_range(entries: list[dict]) -> list[MetricPoint]:
+    points: list[MetricPoint] = []
+    for data in entries:
+        generic = (data or {}).get("generic") or {}
+        vo2 = generic.get("vo2MaxPreciseValue") or generic.get("vo2MaxValue")
+        cal = generic.get("calendarDate")
+        if vo2 is None or not cal:
+            continue
+        try:
+            day = _date.fromisoformat(str(cal)[:10])
+        except ValueError:
+            continue
+        points.append(MetricPoint(day, "vo2_max", float(vo2), "ml/kg/min", SOURCE, data))
+    return points
 
 
 def normalize_training_status(day: _date, data: dict | None) -> list[MetricPoint]:
@@ -192,15 +204,24 @@ def _int(v) -> int | None:
 
 # -- orchestration ----------------------------------------------------------
 def pull(start_date: _date, end_date: _date, client: GarminClient | None = None) -> dict:
-    """Pull Garmin data day-by-day for the inclusive range."""
+    """Pull Garmin data for the inclusive range.
+
+    Range endpoints (VO2 max, activities) are fetched in single calls; only the
+    daily summary + training status need a per-day loop. Training status is
+    skipped on long backfills (it's a slowly-moving aggregate; the latest day
+    captures it) to keep the call count polite.
+    """
     client = client or GarminClient()
     metrics: list[MetricPoint] = []
+    span_days = (end_date - start_date).days + 1
     day = start_date
     while day <= end_date:
         metrics += normalize_daily(day, client.daily_summary(day))
-        metrics += normalize_vo2max(day, client.vo2max(day))
-        metrics += normalize_training_status(day, client.training_status(day))
+        # Training status per-day only on short syncs; else just the final day.
+        if span_days <= 7 or day == end_date:
+            metrics += normalize_training_status(day, client.training_status(day))
         day += timedelta(days=1)
+    metrics += normalize_vo2max_range(client.vo2max_range(start_date, end_date))
     workouts, workout_points = normalize_activities(client.activities(start_date, end_date))
     metrics += workout_points
     return {"metrics": metrics, "sleeps": [], "workouts": workouts}
