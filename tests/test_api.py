@@ -123,3 +123,22 @@ def test_estimated_recovery_and_all_source_trend(session, client):
     # Trend includes the non-canonical Eight Sleep point (extends past whoop).
     t = client.get("/api/trend/hrv_rmssd?days=90").json()
     assert any(p["value"] == 72.0 for p in t["series"])
+
+
+def test_coverage_grid(session, client):
+    from datetime import date, timedelta
+    from healthos.sync.persistence import MetricPoint, upsert_metrics
+
+    d = date.today() - timedelta(days=1)
+    upsert_metrics(session, [
+        MetricPoint(d, "hrv_rmssd", 60.0, "ms", "whoop"),
+        MetricPoint(d, "steps", 8000.0, "steps", "apple_health"),
+        MetricPoint(d, "spo2", 96.0, "percent", "whoop"),
+    ])
+    session.commit()
+    cov = client.get("/api/coverage?days=30").json()
+    assert "spo2" in cov["metrics"]
+    cell = cov["grid"][d.isoformat()]
+    assert cell["hrv_rmssd"] == "whoop"
+    assert cell["steps"] == "apple_health"
+    assert cell["strain_score"] is None

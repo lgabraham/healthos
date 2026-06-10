@@ -28,6 +28,8 @@ CANONICAL_METRIC_SOURCE: dict[str, str] = {
     "awake_minutes": WHOOP,
     "recovery_score": WHOOP,
     "strain_score": WHOOP,
+    "spo2": WHOOP,
+    "respiratory_rate": WHOOP,
     # Garmin owns exercise + training-load + activity volume.
     "exercise_hr": GARMIN,
     "vo2_max": GARMIN,

@@ -219,6 +219,7 @@ def normalize_recovery(records: list[dict]) -> list[MetricPoint]:
             "hrv_rmssd": (score.get("hrv_rmssd_milli"), "ms"),
             "resting_hr": (score.get("resting_heart_rate"), "bpm"),
             "recovery_score": (score.get("recovery_score"), "score"),
+            "spo2": (score.get("spo2_percentage"), "percent"),
         }
         for metric, (value, unit) in mapping.items():
             if value is not None:
@@ -266,6 +267,8 @@ def normalize_sleep(records: list[dict]) -> tuple[list[SleepRecord], list[Metric
             ("deep_sleep_minutes", deep, "minutes"),
             ("light_sleep_minutes", light, "minutes"),
             ("awake_minutes", awake, "minutes"),
+            ("respiratory_rate", score.get("respiratory_rate"), "rpm"),
+            ("sleep_efficiency", score.get("sleep_efficiency_percentage"), "percent"),
         ]:
             if value is not None:
                 points.append(MetricPoint(d, metric, float(value), unit, SOURCE, None))

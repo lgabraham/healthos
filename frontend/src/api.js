@@ -20,5 +20,6 @@ export const api = {
   events: (days, type) =>
     get(`/api/events?days=${days}${type ? `&event_type=${type}` : ""}`),
   correlations: (days) => get(`/api/correlations?days=${days}`),
+  coverage: (days) => get(`/api/coverage?days=${days}`),
   syncLog: () => get("/api/sync-log"),
 };

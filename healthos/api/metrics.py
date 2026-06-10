@@ -251,6 +251,59 @@ def sync_log(
     ]
 
 
+COVERAGE_METRICS = [
+    "recovery_score",
+    "hrv_rmssd",
+    "resting_hr",
+    "strain_score",
+    "sleep_duration_minutes",
+    "respiratory_rate",
+    "spo2",
+    "steps",
+]
+
+
+@router.get("/coverage")
+def coverage(
+    days: int = Query(default=60, ge=7, le=365),
+    db: Session = Depends(db_session),
+) -> dict:
+    """Which source filled each (day, metric) cell — the data-coverage grid."""
+    from ..models import DailyMetric
+
+    end = _latest_date(db)
+    start = end - timedelta(days=days)
+    rows = db.execute(
+        select(DailyMetric.date, DailyMetric.metric, DailyMetric.source, DailyMetric.is_canonical)
+        .where(
+            DailyMetric.metric.in_(COVERAGE_METRICS),
+            DailyMetric.date >= start,
+            DailyMetric.date <= end,
+        )
+    ).all()
+
+    # Best source per (date, metric): canonical wins, else whatever's there.
+    best: dict[tuple[str, str], tuple[str, bool]] = {}
+    for d, metric, src, canon in rows:
+        key = (d.isoformat(), metric)
+        cur = best.get(key)
+        if cur is None or (canon and not cur[1]):
+            best[key] = (src, bool(canon))
+
+    dates = [(start + timedelta(days=i)).isoformat() for i in range((end - start).days + 1)]
+    grid = {
+        date: {m: (best.get((date, m), (None, False))[0]) for m in COVERAGE_METRICS}
+        for date in dates
+    }
+    # Show recovery as 'estimated' where there's no score but HRV+RHR exist.
+    for date in dates:
+        if grid[date]["recovery_score"] is None:
+            day = _date.fromisoformat(date)
+            if estimated_recovery(db, day) is not None:
+                grid[date]["recovery_score"] = "estimated"
+    return {"metrics": COVERAGE_METRICS, "dates": dates, "grid": grid}
+
+
 # -- serializers ------------------------------------------------------------
 def _latest_date(db: Session) -> _date:
     from sqlalchemy import func
