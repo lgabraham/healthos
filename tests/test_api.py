@@ -60,3 +60,26 @@ def test_ios_webhook(session, client):
         assert ev is not None
         assert ev.confidence == "confirmed"
         assert ev.source == "ios_shortcut"
+
+
+def test_metric_webhook_steps(session, client):
+    resp = client.post(
+        "/webhooks/metric",
+        json={"metric": "steps", "value": 8421, "date": "2026-06-09", "source": "apple_health"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+    from sqlalchemy import select
+
+    from healthos.models import DailyMetric
+
+    with SessionLocal() as s:
+        row = s.scalars(
+            select(DailyMetric).where(
+                DailyMetric.metric == "steps", DailyMetric.source == "apple_health"
+            )
+        ).first()
+        assert row is not None
+        assert float(row.value) == 8421
+        assert row.is_canonical is False  # Garmin is canonical for steps

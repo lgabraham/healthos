@@ -1,7 +1,9 @@
-"""Inbound webhooks (currently just iOS Shortcuts).
+"""Inbound webhooks (iOS Shortcuts).
 
-iOS Shortcuts POSTs behavioral data we can't infer from devices — screen time,
-manual tags — and we record them as high-confidence confirmed events.
+Two shapes:
+  * /webhooks/ios     — behavioral *events* (screen time, manual tags).
+  * /webhooks/metric  — numeric *metrics* (e.g. Apple Health steps), which land
+                        in daily_metrics and feed the best-available resolver.
 """
 
 from __future__ import annotations
@@ -53,3 +55,34 @@ def ios_shortcut(payload: IOSEvent, db: Session = Depends(db_session)) -> dict:
     db.execute(stmt)
     db.commit()
     return {"ok": True, "date": payload.date, "event_type": payload.event_type}
+
+
+class MetricIngest(BaseModel):
+    metric: str = Field(..., examples=["steps"])
+    value: float = Field(..., examples=[8421])
+    date: str = Field(..., examples=["2026-06-09"])
+    unit: str | None = Field(default=None, examples=["steps"])
+    source: str = Field(default="apple_health", examples=["apple_health"])
+
+
+@router.post("/metric")
+def ingest_metric(payload: MetricIngest, db: Session = Depends(db_session)) -> dict:
+    """Accept a numeric metric from an iOS Shortcut (e.g. Apple Health steps).
+
+    Canonical flagging follows the usual rules, so e.g. Apple steps stay
+    non-canonical (Garmin owns steps) and surface only as a labeled fallback.
+    """
+    from ..sync.persistence import MetricPoint, upsert_metrics
+
+    day = _date.fromisoformat(payload.date)
+    upsert_metrics(
+        db, [MetricPoint(day, payload.metric, payload.value, payload.unit, payload.source)]
+    )
+    db.commit()
+    return {
+        "ok": True,
+        "date": payload.date,
+        "metric": payload.metric,
+        "value": payload.value,
+        "source": payload.source,
+    }
