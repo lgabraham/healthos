@@ -83,3 +83,14 @@ def test_metric_webhook_steps(session, client):
         assert row is not None
         assert float(row.value) == 8421
         assert row.is_canonical is True  # apple_health is canonical for steps
+
+
+def test_metric_webhook_tolerates_messy_date(session, client):
+    # Repeated lines (the Shortcut bug) -> first line used.
+    r1 = client.post("/webhooks/metric", json={
+        "metric": "steps", "value": "8,421", "date": "2026-06-09\n2026-06-09\n2026-06-09"})
+    assert r1.status_code == 200 and r1.json()["value"] == 8421.0
+    # Missing date -> defaults to today (no error).
+    r2 = client.post("/webhooks/metric", json={"metric": "steps", "value": 5000})
+    assert r2.status_code == 200
+    assert r2.json()["date"]  # a real date string
