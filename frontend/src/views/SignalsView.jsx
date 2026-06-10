@@ -1,7 +1,10 @@
+import { useMemo, useState } from "react";
 import {
+  Brush,
   CartesianGrid,
   ComposedChart,
   Line,
+  LineChart,
   ResponsiveContainer,
   Scatter,
   Tooltip,
@@ -11,28 +14,28 @@ import {
 import { api } from "../api.js";
 import { useHealthData } from "../hooks/useHealthData.js";
 
-// HRV + resting HR over time, with calendar events overlaid as dots colored by
-// TYPE. Each event dot sits ON the HRV line for its day, so a "drinks night ->
-// HRV dip the next morning" reads directly off the chart. Event titles stay
-// local-only (the dashboard runs on the M1, behind Tailscale).
+// HRV and resting HR as two stacked, date-aligned panels (clearer than a
+// dual-axis chart), with calendar events as dots ON the HRV line, colored by
+// type. A navigator strip at the bottom pans/zooms both panels together.
+// Event titles stay local-only.
 const CAT_COLOR = {
   alcohol: "#f59e0b",
   travel: "#38bdf8",
-  work: "#8a8a8a",
   exercise: "#a855f7",
   health: "#ef4444",
   social: "#4ade80",
+  work: "#8a8a8a",
   other: "#52525b",
 };
+// Noisy categories start hidden so the meaningful dots stand out.
+const DEFAULT_ON = new Set(["alcohol", "travel", "exercise", "health", "social"]);
 const AXIS = { stroke: "#3f3f46", fontSize: 11, fontFamily: "IBM Plex Mono" };
-const DAYS = 60;
+const RANGES = [30, 60, 90];
 
 function category(keywords) {
   return (keywords && keywords[0]) || "other";
 }
 
-// Event marker: a colored dot bound to a real data point (robust on a category
-// axis, unlike ReferenceDot which silently fails to place against string x's).
 function EventDot(props) {
   const { cx, cy, payload } = props;
   if (cx == null || cy == null || !payload?.evt) return null;
@@ -48,9 +51,11 @@ function EventDot(props) {
   );
 }
 
-function SignalTooltip({ active, payload, label }) {
+function PanelTooltip({ active, payload, label, unit, color }) {
   if (!active || !payload?.length) return null;
   const row = payload[0].payload;
+  const smooth = row[`${unit}Smooth`];
+  const raw = row[unit];
   return (
     <div
       style={{
@@ -62,8 +67,10 @@ function SignalTooltip({ active, payload, label }) {
       }}
     >
       <div style={{ color: "#8a8a8a" }}>{label}</div>
-      <div style={{ color: "#f59e0b" }}>HRV: {row.hrv == null ? "—" : row.hrv.toFixed(1)} ms</div>
-      <div style={{ color: "#38bdf8" }}>RHR: {row.rhr == null ? "—" : row.rhr.toFixed(1)} bpm</div>
+      <div style={{ color }}>
+        {unit === "hrv" ? "HRV" : "RHR"}: {raw == null ? "—" : raw.toFixed(1)}
+        {smooth != null ? ` · 7d avg ${smooth.toFixed(1)}` : ""}
+      </div>
       {row.evt && (
         <div style={{ color: CAT_COLOR[row.evt] || CAT_COLOR.other, marginTop: "0.2rem" }}>
           ● {row.evt}
@@ -74,121 +81,199 @@ function SignalTooltip({ active, payload, label }) {
   );
 }
 
+function Panel({ data, unit, color, height, smooth, children }) {
+  return (
+    <ResponsiveContainer width="100%" height={height}>
+      <ComposedChart data={data} margin={{ top: 8, right: 12, bottom: 0, left: -8 }} syncId="signals">
+        <CartesianGrid stroke="#1f1f1f" vertical={false} />
+        <XAxis dataKey="date" tick={AXIS} minTickGap={28} tickLine={false} axisLine={AXIS} />
+        <YAxis tick={AXIS} width={42} tickLine={false} axisLine={AXIS} domain={["auto", "auto"]} />
+        <Tooltip content={<PanelTooltip unit={unit} color={color} />} />
+        {/* raw trace: faint when smoothing, prominent when not */}
+        <Line
+          type="monotone"
+          dataKey={unit}
+          stroke={color}
+          strokeWidth={smooth ? 1 : 2}
+          strokeOpacity={smooth ? 0.3 : 1}
+          dot={false}
+          connectNulls
+          isAnimationActive={false}
+        />
+        {smooth && (
+          <Line
+            type="monotone"
+            dataKey={`${unit}Smooth`}
+            stroke={color}
+            strokeWidth={2}
+            dot={false}
+            connectNulls
+            isAnimationActive={false}
+          />
+        )}
+        {children}
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
 export default function SignalsView() {
-  const { data: hrv, loading, error } = useHealthData(() => api.trend("hrv_rmssd", DAYS, 7), []);
-  const { data: rhr } = useHealthData(() => api.trend("resting_hr", DAYS, 7), []);
-  const { data: cal } = useHealthData(() => api.calendar(DAYS), []);
+  const [days, setDays] = useState(60);
+  const [smooth, setSmooth] = useState(true);
+  const [cats, setCats] = useState(DEFAULT_ON);
+  const [win, setWin] = useState(null); // {s, e} indices from the navigator
+
+  const { data: hrv, loading, error } = useHealthData(() => api.trend("hrv_rmssd", days, 7), [days]);
+  const { data: rhr } = useHealthData(() => api.trend("resting_hr", days, 7), [days]);
+  const { data: cal } = useHealthData(() => api.calendar(days), [days]);
+
+  const merged = useMemo(() => {
+    const hrvS = Object.fromEntries((hrv?.series || []).map((d) => [d.date, d]));
+    const rhrS = Object.fromEntries((rhr?.series || []).map((d) => [d.date, d]));
+    const events = (cal || []).filter((e) => !e.all_day);
+    const evtByDate = {};
+    for (const e of events) {
+      const c = category(e.keywords);
+      // First event of an enabled category wins the day's marker.
+      if (!(e.date in evtByDate) && cats.has(c)) evtByDate[e.date] = { evt: c, title: e.title };
+    }
+    const dates = Array.from(
+      new Set([...Object.keys(hrvS), ...Object.keys(evtByDate)])
+    ).sort();
+    const hrvVals = dates.map((d) => hrvS[d]?.value).filter((v) => v != null);
+    const floor = hrvVals.length ? Math.min(...hrvVals) : 0;
+    return dates.map((date) => {
+      const ev = evtByDate[date];
+      const h = hrvS[date];
+      const r = rhrS[date];
+      return {
+        date,
+        hrv: h?.value ?? null,
+        hrvSmooth: h?.rolling ?? null,
+        rhr: r?.value ?? null,
+        rhrSmooth: r?.rolling ?? null,
+        evt: ev ? ev.evt : null,
+        evtTitle: ev ? ev.title : null,
+        evtY: ev ? (h?.value ?? floor) : null,
+      };
+    });
+  }, [hrv, rhr, cal, cats]);
 
   if (loading) return <div className="muted mono">loading…</div>;
   if (error) return <div className="error">error: {error}</div>;
-
-  const hrvByDate = Object.fromEntries((hrv?.series || []).map((d) => [d.date, d.value]));
-  const rhrByDate = Object.fromEntries((rhr?.series || []).map((d) => [d.date, d.value]));
-  const events = (cal || []).filter((e) => !e.all_day);
-
-  const hrvValues = Object.values(hrvByDate).filter((v) => v != null);
-  const hrvFloor = hrvValues.length ? Math.min(...hrvValues) : 0;
-
-  // One classified event per date (first wins) so a day gets a single marker.
-  const evtByDate = {};
-  for (const e of events) {
-    if (!(e.date in evtByDate)) evtByDate[e.date] = { evt: category(e.keywords), title: e.title };
-  }
-
-  // X axis = union of metric dates + event dates, sorted, so every event lands.
-  const dates = Array.from(
-    new Set([...Object.keys(hrvByDate), ...Object.keys(evtByDate)])
-  ).sort();
-  const merged = dates.map((date) => {
-    const ev = evtByDate[date];
-    return {
-      date,
-      hrv: hrvByDate[date] ?? null,
-      rhr: rhrByDate[date] ?? null,
-      evt: ev ? ev.evt : null,
-      evtTitle: ev ? ev.title : null,
-      // Pin the dot to that day's HRV; fall back to the floor if HRV is missing.
-      evtY: ev ? (hrvByDate[date] ?? hrvFloor) : null,
-    };
-  });
 
   const hasData = merged.some((d) => d.hrv != null || d.rhr != null);
   if (!hasData) {
     return (
       <div className="panel">
-        <div className="muted mono">No HRV or resting-HR data in the last {DAYS} days yet.</div>
+        <div className="muted mono">No HRV or resting-HR data in the last {days} days yet.</div>
       </div>
     );
   }
 
+  const s = win ? Math.max(0, Math.min(win.s, merged.length - 1)) : 0;
+  const e = win ? Math.max(s, Math.min(win.e, merged.length - 1)) : merged.length - 1;
+  const visible = merged.slice(s, e + 1);
+
+  const toggleCat = (c) => {
+    const next = new Set(cats);
+    if (next.has(c)) next.delete(c);
+    else next.add(c);
+    setCats(next);
+  };
+
   return (
     <>
-      <div className="statusline" style={{ marginBottom: "0.8rem" }}>
-        HRV (amber, left) + resting HR (blue, right) · {DAYS}d · calendar events as dots on the HRV
-        line, colored by type · titles local-only
+      <div className="statusline" style={{ marginBottom: "0.6rem" }}>
+        each dot = a calendar event that day, sitting on the HRV line — the effect of an evening
+        event shows in the NEXT morning's reading · drag the strip below to scroll time
       </div>
-      <div className="panel">
-        <ResponsiveContainer width="100%" height={380}>
-          <ComposedChart data={merged} margin={{ top: 8, right: 12, bottom: 4, left: -8 }}>
-            <CartesianGrid stroke="#1f1f1f" vertical={false} />
-            <XAxis dataKey="date" tick={AXIS} minTickGap={28} tickLine={false} axisLine={AXIS} />
-            <YAxis
-              yAxisId="hrv"
-              tick={AXIS}
-              width={42}
-              tickLine={false}
-              axisLine={AXIS}
-              domain={["auto", "auto"]}
-            />
-            <YAxis
-              yAxisId="rhr"
-              orientation="right"
-              tick={AXIS}
-              width={42}
-              tickLine={false}
-              axisLine={AXIS}
-              domain={["auto", "auto"]}
-            />
-            <Tooltip content={<SignalTooltip />} />
-            <Line
-              yAxisId="hrv"
-              type="monotone"
-              dataKey="hrv"
-              name="HRV (ms)"
-              stroke="#f59e0b"
-              strokeWidth={2}
-              dot={false}
-              connectNulls
-              isAnimationActive={false}
-            />
-            <Line
-              yAxisId="rhr"
-              type="monotone"
-              dataKey="rhr"
-              name="RHR (bpm)"
-              stroke="#38bdf8"
-              strokeWidth={1.5}
-              dot={false}
-              connectNulls
-              isAnimationActive={false}
-            />
-            <Scatter
-              yAxisId="hrv"
-              dataKey="evtY"
-              shape={<EventDot />}
-              isAnimationActive={false}
-              legendType="none"
-            />
-          </ComposedChart>
-        </ResponsiveContainer>
-        <div className="legend" style={{ marginTop: "0.6rem" }}>
-          {Object.entries(CAT_COLOR).map(([c, col]) => (
-            <span key={c}>
-              <i style={{ background: col }} />
-              {c}
-            </span>
+
+      <div style={{ display: "flex", gap: "0.6rem", alignItems: "center", marginBottom: "0.8rem", flexWrap: "wrap" }}>
+        <div className="toggle">
+          {RANGES.map((r) => (
+            <button
+              key={r}
+              className={days === r ? "active" : ""}
+              onClick={() => {
+                setDays(r);
+                setWin(null);
+              }}
+            >
+              {r}d
+            </button>
           ))}
         </div>
+        <div className="toggle">
+          <button className={smooth ? "active" : ""} onClick={() => setSmooth(true)}>
+            7d avg
+          </button>
+          <button className={!smooth ? "active" : ""} onClick={() => setSmooth(false)}>
+            raw
+          </button>
+        </div>
+        <div className="legend" style={{ marginLeft: "auto" }}>
+          {Object.entries(CAT_COLOR).map(([c, col]) => (
+            <button
+              key={c}
+              onClick={() => toggleCat(c)}
+              style={{
+                background: "none",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                font: "inherit",
+                color: "inherit",
+                opacity: cats.has(c) ? 1 : 0.3,
+              }}
+              title={cats.has(c) ? `hide ${c} events` : `show ${c} events`}
+            >
+              <i style={{ background: col }} />
+              {c}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="label">HRV (ms)</div>
+        <Panel data={visible} unit="hrv" color="#f59e0b" height={240} smooth={smooth}>
+          <Scatter dataKey="evtY" shape={<EventDot />} isAnimationActive={false} legendType="none" />
+        </Panel>
+
+        <div className="label" style={{ marginTop: "0.6rem" }}>
+          Resting HR (bpm)
+        </div>
+        <Panel data={visible} unit="rhr" color="#38bdf8" height={160} smooth={smooth} />
+
+        {/* Navigator: full range, drag the handles / slide the window to pan both panels. */}
+        <ResponsiveContainer width="100%" height={64}>
+          <LineChart data={merged} margin={{ top: 8, right: 12, bottom: 0, left: -8 }}>
+            <XAxis dataKey="date" hide />
+            <YAxis hide domain={["auto", "auto"]} />
+            <Line
+              type="monotone"
+              dataKey={smooth ? "hrvSmooth" : "hrv"}
+              stroke="#f59e0b"
+              strokeWidth={1}
+              strokeOpacity={0.6}
+              dot={false}
+              connectNulls
+              isAnimationActive={false}
+            />
+            <Brush
+              dataKey="date"
+              height={22}
+              travellerWidth={8}
+              stroke="#3f3f46"
+              fill="#111111"
+              tickFormatter={() => ""}
+              startIndex={s}
+              endIndex={e}
+              onChange={({ startIndex, endIndex }) => setWin({ s: startIndex, e: endIndex })}
+            />
+          </LineChart>
+        </ResponsiveContainer>
       </div>
     </>
   );
