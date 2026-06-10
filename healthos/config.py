@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     sync_hour: int = Field(default=6, alias="SYNC_HOUR")
     port: int = Field(default=8000, alias="PORT")
     cors_origins: str = Field(default="http://localhost:5173", alias="CORS_ORIGINS")
+    # Calendar: comma-separated secret .ics URLs (read-only iCal links).
+    calendar_ics_urls: str = Field(default="", alias="CALENDAR_ICS_URLS")
+    # Local hour (0-23) at/after which an event counts as "evening".
+    evening_hour: int = Field(default=18, alias="EVENING_HOUR")
+    # Events-per-day above which a day is flagged calendar_heavy_day.
+    calendar_heavy_threshold: int = Field(default=6, alias="CALENDAR_HEAVY_THRESHOLD")
     # Run the in-process nightly scheduler. Set false when an external cron owns
     # the schedule (e.g. an always-on host running `healthos sync`), so the two
     # don't double-sync — which matters for Garmin's rate limits.
@@ -69,6 +75,10 @@ class Settings(BaseSettings):
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def calendar_ics_url_list(self) -> list[str]:
+        return [u.strip() for u in self.calendar_ics_urls.split(",") if u.strip()]
 
     def sync_db_url(self) -> str:
         """A psycopg (sync) SQLAlchemy URL.

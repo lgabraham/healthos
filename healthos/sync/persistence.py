@@ -66,6 +66,20 @@ class WorkoutRecord:
 
 
 @dataclass
+class CalendarEventRecord:
+    date: _date
+    uid: str
+    title: str | None = None
+    location: str | None = None
+    start_time: datetime | None = None
+    end_time: datetime | None = None
+    all_day: bool = False
+    is_evening: bool = False
+    keywords: list[str] | None = None
+    source: str = "ics"
+
+
+@dataclass
 class SyncResult:
     source: str
     sync_type: str
@@ -203,6 +217,44 @@ def upsert_workouts(session: Session, records: list[WorkoutRecord]) -> int:
             existing.distance_km = r.distance_km
             existing.tss = r.tss
             existing.raw_json = r.raw_json
+        written += 1
+    return written
+
+
+def upsert_calendar_events(session: Session, records: list[CalendarEventRecord]) -> int:
+    """Insert/update calendar events, deduped on (uid, start_time)."""
+    from ..models import CalendarEvent
+
+    written = 0
+    for r in records:
+        stmt = (
+            pg_insert(CalendarEvent)
+            .values(
+                date=r.date,
+                uid=r.uid,
+                title=r.title,
+                location=r.location,
+                start_time=r.start_time,
+                end_time=r.end_time,
+                all_day=r.all_day,
+                is_evening=r.is_evening,
+                keywords=r.keywords,
+                source=r.source,
+            )
+            .on_conflict_do_update(
+                constraint="uq_calendar_uid_start",
+                set_={
+                    "date": r.date,
+                    "title": r.title,
+                    "location": r.location,
+                    "end_time": r.end_time,
+                    "all_day": r.all_day,
+                    "is_evening": r.is_evening,
+                    "keywords": r.keywords,
+                },
+            )
+        )
+        session.execute(stmt)
         written += 1
     return written
 

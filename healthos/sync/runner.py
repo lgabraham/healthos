@@ -13,9 +13,10 @@ from datetime import date as _date
 
 from ..config import settings
 from ..database import get_session
-from . import eight_sleep, garmin, whoop
+from . import calendar, eight_sleep, garmin, whoop
 from .persistence import (
     SyncResult,
+    upsert_calendar_events,
     upsert_metrics,
     upsert_sleep,
     upsert_workouts,
@@ -29,6 +30,7 @@ SOURCES: dict[str, tuple[Callable[[_date, _date], dict], str]] = {
     "whoop": (whoop.pull, whoop.SOURCE),
     "garmin": (garmin.pull, garmin.SOURCE),
     "eight_sleep": (eight_sleep.pull, eight_sleep.SOURCE),
+    "calendar": (calendar.pull, calendar.SOURCE),
 }
 
 
@@ -43,6 +45,7 @@ def sync_source(name: str, start: _date, end: _date, sync_type: str = "daily") -
             written += upsert_metrics(session, data.get("metrics", []))
             written += upsert_sleep(session, data.get("sleeps", []))
             written += upsert_workouts(session, data.get("workouts", []))
+            written += upsert_calendar_events(session, data.get("calendar_events", []))
             result.records_written = written
             write_sync_log(session, result)
         log.info("Synced %s %s..%s: %d records", source, start, end, result.records_written)

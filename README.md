@@ -128,6 +128,16 @@ Baselines use a rolling 30-day window and **exclude days flagged `sick`**.
 - **sauna** — Eight Sleep skin-temp elevated early then a faster-than-average
   drop; requires 30+ nights of baseline and stays low-confidence until confirmed.
 - **high_stress_day** — recovery in the red zone (daytime HRV suppression proxy).
+- **calendar_heavy_day** — more than `CALENDAR_HEAVY_THRESHOLD` events on a day.
+
+### Calendar context (optional)
+
+Set `CALENDAR_ICS_URLS` to one or more *secret* `.ics` feed URLs (read-only iCal
+links). Each sync pulls + expands recurring events and tags them (alcohol /
+travel keywords, evening flag). An evening alcohol-tagged event the night before
+acts as a corroborating prior — letting `alcohol_detected` fire on 2/3
+physiological signals instead of 3/3. Event **titles are stored for the local
+dashboard but redacted by the MCP server**, so they never reach Claude.
 
 Inference is **suppressed entirely until 14+ days of data exist**; the dashboard
 shows a "building baseline" banner during this period. Replay historical

@@ -18,8 +18,8 @@ def session():
     s = SessionLocal()
     s.execute(
         text(
-            "TRUNCATE daily_metrics, sleep_sessions, workouts, daily_events, sync_log "
-            "RESTART IDENTITY CASCADE"
+            "TRUNCATE daily_metrics, sleep_sessions, workouts, daily_events, "
+            "calendar_events, sync_log RESTART IDENTITY CASCADE"
         )
     )
     s.commit()

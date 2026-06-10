@@ -30,9 +30,15 @@ INSTRUCTIONS = (
     "HealthOS contains personal health data. Canonical sources are: Whoop for "
     "HRV/sleep/recovery, Garmin for exercise/training, Eight Sleep for sleep "
     "environment. Behavioral events may be inferred (lower confidence) or "
-    "confirmed. When answering trend questions, always note sample size and "
-    "flag if the baseline is < 30 days."
+    "confirmed. Calendar context is available as keywords/flags only — event "
+    "titles and locations are intentionally redacted and never exposed here. "
+    "When answering trend questions, always note sample size and flag if the "
+    "baseline is < 30 days."
 )
+
+# Columns whose values are redacted in query_raw output (privacy: calendar
+# titles/locations stay on the local dashboard, never reach the model).
+REDACTED_COLUMNS = {"title", "location"}
 
 mcp = FastMCP("HealthOS", instructions=INSTRUCTIONS)
 
@@ -193,10 +199,12 @@ def query_raw(sql: str) -> dict:
         result = s.execute(text(cleaned))
         cols = list(result.keys())
         rows = [dict(zip(cols, r)) for r in result.fetchmany(500)]
-        # JSON-safe coercion for dates/decimals.
+        # JSON-safe coercion for dates/decimals; redact sensitive columns.
         for row in rows:
             for k, v in row.items():
-                if hasattr(v, "isoformat"):
+                if k in REDACTED_COLUMNS:
+                    row[k] = "[redacted]" if v is not None else None
+                elif hasattr(v, "isoformat"):
                     row[k] = v.isoformat()
                 elif isinstance(v, (bytes, bytearray)):
                     row[k] = v.decode("utf-8", "replace")
@@ -206,6 +214,36 @@ def query_raw(sql: str) -> dict:
                     except (TypeError, ValueError):
                         row[k] = str(v)
         return {"columns": cols, "row_count": len(rows), "rows": rows}
+
+
+@mcp.tool()
+def get_calendar(days: int = 30) -> dict:
+    """Calendar context for the trailing N days — keywords/flags only.
+
+    Event titles and locations are intentionally NOT included (privacy). Use
+    this to relate behavior (e.g. evening 'alcohol'-tagged events) to metrics.
+    """
+    from ..models import CalendarEvent
+
+    with get_session() as s:
+        rows = s.scalars(
+            select(CalendarEvent)
+            .where(CalendarEvent.date >= _date.today() - timedelta(days=days))
+            .order_by(CalendarEvent.date.desc())
+        ).all()
+        return {
+            "days": days,
+            "n": len(rows),
+            "events": [
+                {
+                    "date": e.date.isoformat(),
+                    "is_evening": e.is_evening,
+                    "all_day": e.all_day,
+                    "keywords": e.keywords or [],
+                }
+                for e in rows
+            ],
+        }
 
 
 @mcp.tool()

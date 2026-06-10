@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..correlate import correlate_metrics, prebuilt_cards
 from ..database import db_session
-from ..models import DailyEvent, SleepSession, SyncLog, Workout
+from ..models import CalendarEvent, DailyEvent, SleepSession, SyncLog, Workout
 from ..queries import (
     MIN_INFERENCE_DAYS,
     canonical_sleep,
@@ -93,14 +93,35 @@ def daily(
     last_wk = latest_workout(db, day)
     events = db.scalars(select(DailyEvent).where(DailyEvent.date == day)).all()
 
+    # The "why" layer: events today + the night before (which shaped last sleep).
+    cal = db.scalars(
+        select(CalendarEvent)
+        .where(CalendarEvent.date.in_([day, day - timedelta(days=1)]))
+        .order_by(CalendarEvent.start_time.asc().nullsfirst())
+    ).all()
+
     return {
         "date": day.isoformat(),
         "metrics": metrics,
         "sleep": _sleep_dict(sleep),
         "events": [_event_dict(e) for e in events],
+        "calendar": [_calendar_dict(c) for c in cal],
         "last_workout": _workout_dict(last_wk),
         "building_baseline": data_day_count(db) < MIN_INFERENCE_DAYS,
     }
+
+
+@router.get("/calendar")
+def calendar_events(
+    days: int = Query(default=30, ge=1, le=365),
+    db: Session = Depends(db_session),
+) -> list[dict]:
+    rows = db.scalars(
+        select(CalendarEvent)
+        .where(CalendarEvent.date >= _date.today() - timedelta(days=days))
+        .order_by(CalendarEvent.start_time.desc().nullslast())
+    ).all()
+    return [_calendar_dict(c) for c in rows]
 
 
 @router.get("/trend/{metric}")
@@ -249,6 +270,19 @@ def _workout_dict(w: Workout | None) -> dict | None:
         "calories": w.calories,
         "distance_km": float(w.distance_km) if w.distance_km is not None else None,
         "tss": float(w.tss) if w.tss is not None else None,
+    }
+
+
+def _calendar_dict(c: CalendarEvent) -> dict:
+    return {
+        "date": c.date.isoformat(),
+        "title": c.title,  # local dashboard only; redacted by the MCP server
+        "location": c.location,
+        "start_time": _local(c.start_time),
+        "end_time": _local(c.end_time),
+        "all_day": c.all_day,
+        "is_evening": c.is_evening,
+        "keywords": c.keywords or [],
     }
 
 

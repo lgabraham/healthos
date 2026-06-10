@@ -4,6 +4,7 @@ import RecoveryScore from "../components/RecoveryScore.jsx";
 import MetricStat from "../components/MetricStat.jsx";
 import SleepCard from "../components/SleepCard.jsx";
 import EventTimeline from "../components/EventTimeline.jsx";
+import CalendarStrip from "../components/CalendarStrip.jsx";
 import { hm, num } from "../format.js";
 
 export default function DailyView() {
@@ -38,6 +39,10 @@ export default function DailyView() {
       <div className="grid cols-2" style={{ marginTop: "0.85rem" }}>
         <SleepCard sleep={daily.sleep} />
         <EventTimeline events={daily.events} title="Inferred / confirmed events" />
+      </div>
+
+      <div className="grid" style={{ marginTop: "0.85rem" }}>
+        <CalendarStrip events={daily.calendar} />
       </div>
 
       <div className="grid cols-2" style={{ marginTop: "0.85rem" }}>

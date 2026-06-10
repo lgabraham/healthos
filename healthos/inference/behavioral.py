@@ -19,7 +19,8 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from ..models import DailyEvent, Workout
+from ..config import settings
+from ..models import CalendarEvent, DailyEvent, Workout
 from ..queries import (
     MIN_INFERENCE_DAYS,
     canonical_sleep,
@@ -92,19 +93,28 @@ def detect_alcohol(session: Session, day: _date) -> InferredEvent | None:
         rhr > 1.1 * rhr_base.mean,
         hrv < 0.85 * hrv_base.mean,
     )
-    if all(conditions):
-        return InferredEvent(
-            event_type="alcohol_detected",
-            value=None,
-            confidence="inferred",
-            notes=(
-                f"HRV {hrv:.0f} vs base {hrv_base.mean:.0f}; "
-                f"RHR {rhr:.0f} vs {rhr_base.mean:.0f}; "
-                f"latency {latency:.0f}m vs {latency_base:.0f}m"
-            ),
-            source="inferred_whoop",
-        )
-    return None
+    n_true = sum(conditions)
+    # Calendar acts as a corroborating prior: an evening "alcohol" event the
+    # night before lets us fire on 2/3 physiological signals instead of 3/3.
+    corroborated = _evening_alcohol_event(session, day) is not None
+    if not (all(conditions) or (corroborated and n_true >= 2)):
+        return None
+
+    notes = (
+        f"HRV {hrv:.0f} vs base {hrv_base.mean:.0f}; "
+        f"RHR {rhr:.0f} vs {rhr_base.mean:.0f}; "
+        f"latency {latency:.0f}m vs {latency_base:.0f}m"
+    )
+    # Note the keyword/flag only — never the raw event title (MCP reads notes).
+    if corroborated:
+        notes += "; corroborated by an evening calendar event (alcohol)"
+    return InferredEvent(
+        event_type="alcohol_detected",
+        value=None,
+        confidence="inferred",
+        notes=notes,
+        source="inferred_whoop+calendar" if corroborated else "inferred_whoop",
+    )
 
 
 def detect_late_workout(session: Session, day: _date) -> InferredEvent | None:
@@ -116,8 +126,6 @@ def detect_late_workout(session: Session, day: _date) -> InferredEvent | None:
         end = w.end_time
         if end is None:
             continue
-        from ..config import settings
-
         local_end = end.astimezone(settings.tz)
         if local_end.hour >= LATE_WORKOUT_HOUR:
             return InferredEvent(
@@ -199,6 +207,21 @@ def detect_sauna(session: Session, day: _date) -> InferredEvent | None:
     return None
 
 
+def detect_calendar_heavy(session: Session, day: _date) -> InferredEvent | None:
+    """A day packed with calendar events, as a daytime-stress proxy."""
+    events = _calendar_events(session, day)
+    n = len(events)
+    if n >= settings.calendar_heavy_threshold:
+        return InferredEvent(
+            event_type="calendar_heavy_day",
+            value=float(n),
+            confidence="inferred",
+            notes=f"{n} calendar events scheduled",
+            source="inferred_calendar",
+        )
+    return None
+
+
 def detect_high_stress(session: Session, day: _date) -> InferredEvent | None:
     """Daytime HRV suppression vs baseline (proxy: low recovery score)."""
     recovery = canonical_value(session, day, "recovery_score")
@@ -222,6 +245,7 @@ RULES = [
     detect_sick,
     detect_sauna,
     detect_high_stress,
+    detect_calendar_heavy,
 ]
 
 
@@ -253,6 +277,21 @@ def _recent_sick(session: Session, day: _date, lookback: int) -> bool:
         )
     ).all()
     return bool(rows)
+
+
+def _calendar_events(session: Session, day: _date) -> list[CalendarEvent]:
+    return list(
+        session.scalars(select(CalendarEvent).where(CalendarEvent.date == day)).all()
+    )
+
+
+def _evening_alcohol_event(session: Session, day: _date) -> CalendarEvent | None:
+    """An evening, alcohol-tagged event the night before `day` (whose sleep it
+    would have affected)."""
+    for ev in _calendar_events(session, day - timedelta(days=1)):
+        if ev.is_evening and ev.keywords and "alcohol" in ev.keywords:
+            return ev
+    return None
 
 
 def _sleep_latency_minutes(session: Session, day: _date) -> float | None:
