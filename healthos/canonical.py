@@ -11,6 +11,7 @@ from __future__ import annotations
 WHOOP = "whoop"
 GARMIN = "garmin"
 EIGHT_SLEEP = "eight_sleep"
+APPLE_HEALTH = "apple_health"  # pushed from the phone via the iOS Shortcut
 
 ALL_SOURCES = (WHOOP, GARMIN, EIGHT_SLEEP)
 
@@ -32,7 +33,9 @@ CANONICAL_METRIC_SOURCE: dict[str, str] = {
     "vo2_max": GARMIN,
     "training_load": GARMIN,
     "tss": GARMIN,
-    "steps": GARMIN,
+    # Phone is carried everywhere, so it's the better step counter than a
+    # sometimes-worn watch — Apple Health wins; Garmin steps become a fallback.
+    "steps": APPLE_HEALTH,
     "workout_duration_minutes": GARMIN,
     # Eight Sleep owns the sleep *environment*.
     "bed_temp": EIGHT_SLEEP,

@@ -27,15 +27,17 @@ def test_canonical_flag_applied(session):
 
 
 def test_upsert_is_idempotent(session):
-    p = MetricPoint(date(2026, 6, 1), "steps", 8000.0, "steps", "garmin")
+    p = MetricPoint(date(2026, 6, 1), "steps", 8000.0, "steps", "apple_health")
     upsert_metrics(session, [p])
-    upsert_metrics(session, [MetricPoint(date(2026, 6, 1), "steps", 9000.0, "steps", "garmin")])
+    upsert_metrics(
+        session, [MetricPoint(date(2026, 6, 1), "steps", 9000.0, "steps", "apple_health")]
+    )
     session.commit()
 
     rows = session.scalars(select(DailyMetric).where(DailyMetric.metric == "steps")).all()
     assert len(rows) == 1
     assert float(rows[0].value) == 9000.0  # latest value wins
-    assert rows[0].is_canonical is True  # garmin canonical for steps
+    assert rows[0].is_canonical is True  # apple_health canonical for steps
 
 
 def test_best_available_prefers_canonical_then_falls_back(session):

@@ -82,4 +82,4 @@ def test_metric_webhook_steps(session, client):
         ).first()
         assert row is not None
         assert float(row.value) == 8421
-        assert row.is_canonical is False  # Garmin is canonical for steps
+        assert row.is_canonical is True  # apple_health is canonical for steps
