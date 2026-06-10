@@ -69,7 +69,7 @@ export default function DailyView() {
       </div>
 
       <div className="grid" style={{ marginTop: "0.85rem" }}>
-        <CalendarStrip events={daily.calendar} />
+        <CalendarStrip events={daily.calendar} viewDate={daily.date} />
       </div>
 
       <div className="grid cols-2" style={{ marginTop: "0.85rem" }}>
