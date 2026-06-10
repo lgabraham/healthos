@@ -39,8 +39,9 @@ def test_daily_summary_and_trend(session, client):
 
     trend = client.get("/api/trend/hrv_rmssd?days=60&rolling=7").json()
     assert trend["metric"] == "hrv_rmssd"
-    # Padded to one entry per calendar day for cross-metric axis alignment.
-    assert len(trend["series"]) == 61
+    # Padded to one entry per calendar day, clamped to the first data date —
+    # 40 days of data means a 40-entry axis, not 60 days with dead space.
+    assert len(trend["series"]) == 40
     assert sum(1 for p in trend["series"] if p["value"] is not None) == 40
 
 
@@ -172,4 +173,6 @@ def test_attribution_and_aligned_trend(session, client):
     t1 = client.get("/api/trend/hrv_rmssd?days=40").json()
     t2 = client.get("/api/trend/resting_hr?days=40").json()
     assert [p["date"] for p in t1["series"]] == [p["date"] for p in t2["series"]]
-    assert len(t1["series"]) == 41  # one entry per calendar day
+    # One entry per calendar day, clamped to the first data date (31 days of
+    # data -> 31 entries, not 41 with dead space before the data starts).
+    assert len(t1["series"]) == 31

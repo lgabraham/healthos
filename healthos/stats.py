@@ -25,15 +25,25 @@ def pearson(xs: list[float], ys: list[float]) -> float | None:
 
 
 def rolling_average(series: list[tuple], window: int) -> list[dict]:
-    """Rolling mean over (date, value) pairs. Emits {date, value, rolling}."""
+    """Rolling mean over (date, value) pairs. Emits {date, value, rolling}.
+
+    Calendar-aware when the caller passes one entry per day with ``None`` for
+    gap days (the trend endpoint does): the window slides over the trailing
+    ``window`` *entries* and averages only the values present, so a reading
+    from before a two-week gap can't leak into "this week's" average. The
+    rolling value is None when fewer than ``max(1, window // 3)`` readings
+    exist in the window — too sparse to call an average honestly.
+    """
     out: list[dict] = []
-    values: list[float] = []
+    recent: list[float | None] = []
+    min_present = max(1, window // 3)
     for d, v in series:
-        values.append(v)
-        if len(values) > window:
-            values.pop(0)
-        rolling = sum(values) / len(values)
-        out.append({"date": d.isoformat(), "value": v, "rolling": round(rolling, 2)})
+        recent.append(v)
+        if len(recent) > window:
+            recent.pop(0)
+        present = [x for x in recent if x is not None]
+        rolling = round(sum(present) / len(present), 2) if len(present) >= min_present else None
+        out.append({"date": d.isoformat(), "value": v, "rolling": rolling})
     return out
 
 

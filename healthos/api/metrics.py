@@ -153,21 +153,24 @@ def trend(
 
     Uses the best-available source per day (not just canonical), so the line
     extends through the current day wherever any device has data. The series is
-    padded to one entry per calendar day (nulls for gaps) so different metrics
-    share an identical, vertically-comparable x-axis.
+    padded to one entry per calendar day (nulls for gaps) BEFORE the rolling
+    average, so the average is calendar-aware (a reading from before a long gap
+    can't leak into "this week"). The window start is clamped to the first date
+    any metric has data — same anchor for every metric, so all charts share an
+    identical x-axis without weeks of dead space when history is short.
     """
     series = metric_series(db, metric, days, canonical_only=False)
-    enriched = rolling_average(series, rolling)
-    by_date = {p["date"]: p for p in enriched}
+    by_date = {d: v for d, v in series}
     end = _latest_date_any(db)
     start = end - timedelta(days=days)
-    enriched = [
-        by_date.get(
-            (start + timedelta(days=i)).isoformat(),
-            {"date": (start + timedelta(days=i)).isoformat(), "value": None, "rolling": None},
-        )
-        for i in range(days + 1)
+    first_data = _earliest_date_any(db)
+    if first_data and first_data > start:
+        start = first_data
+    padded = [
+        (start + timedelta(days=i), by_date.get(start + timedelta(days=i)))
+        for i in range((end - start).days + 1)
     ]
+    enriched = rolling_average(padded, rolling)
     event_rows = db.scalars(
         select(DailyEvent).where(DailyEvent.date >= _date.today() - timedelta(days=days))
     ).all()
@@ -337,6 +340,16 @@ def _latest_date_any(db: Session) -> _date:
     from ..models import DailyMetric
 
     return db.scalar(select(func.max(DailyMetric.date))) or _date.today()
+
+
+def _earliest_date_any(db: Session) -> _date | None:
+    """Min date with any metric — clamps trend windows so charts don't render
+    weeks of empty axis when the requested range predates all data."""
+    from sqlalchemy import func
+
+    from ..models import DailyMetric
+
+    return db.scalar(select(func.min(DailyMetric.date)))
 
 
 def _latest_date(db: Session) -> _date:
