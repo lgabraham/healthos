@@ -78,7 +78,79 @@ def _cmd_infer(args: argparse.Namespace) -> None:
             if written:
                 print(f"  {day}: {', '.join(written)}")
             day += timedelta(days=1)
-    print(f"Inferred {total} events.")
+        print(f"Inferred {total} events.")
+        if total == 0:
+            _print_inference_diagnostics(session, start, end)
+
+
+def _print_inference_diagnostics(session, start: date, end: date) -> None:
+    """When nothing fires, say WHY: which rules had inputs, which thresholds
+    were closest. Rules are conservative by design — zero is often correct,
+    but it should never be unexplained."""
+    from sqlalchemy import func, select
+
+    from .config import settings
+    from .models import CalendarEvent, DailyMetric, SleepSession, Workout
+
+    def days_with(metric: str) -> int:
+        return int(
+            session.scalar(
+                select(func.count(func.distinct(DailyMetric.date))).where(
+                    DailyMetric.metric == metric,
+                    DailyMetric.is_canonical.is_(True),
+                    DailyMetric.value > 0,
+                    DailyMetric.date >= start,
+                    DailyMetric.date <= end,
+                )
+            )
+            or 0
+        )
+
+    min_recovery = session.scalar(
+        select(func.min(DailyMetric.value)).where(
+            DailyMetric.metric == "recovery_score",
+            DailyMetric.is_canonical.is_(True),
+            DailyMetric.value > 0,
+            DailyMetric.date >= start,
+            DailyMetric.date <= end,
+        )
+    )
+    late = 0
+    for w in session.scalars(
+        select(Workout).where(Workout.date >= start, Workout.date <= end)
+    ).all():
+        if w.end_time and w.end_time.astimezone(settings.tz).hour >= 19:
+            late += 1
+    evening_alcohol = session.scalar(
+        select(func.count(CalendarEvent.id)).where(
+            CalendarEvent.is_evening.is_(True),
+            CalendarEvent.keywords.contains(["alcohol"]),
+            CalendarEvent.date >= start,
+            CalendarEvent.date <= end,
+        )
+    )
+    es_nights = session.scalar(
+        select(func.count(SleepSession.id)).where(SleepSession.source == "eight_sleep")
+    )
+    busiest = session.execute(
+        select(CalendarEvent.date, func.count(CalendarEvent.id))
+        .where(CalendarEvent.date >= start, CalendarEvent.date <= end)
+        .group_by(CalendarEvent.date)
+        .order_by(func.count(CalendarEvent.id).desc())
+        .limit(1)
+    ).first()
+
+    print("\nWhy zero? Rule-by-rule inputs over this range:")
+    print(f"  high_stress     needs recovery <34; your lowest was "
+          f"{f'{float(min_recovery):.0f}' if min_recovery is not None else 'n/a (no recovery data)'}")
+    print(f"  late_workout    needs a workout ending >=19:00; found {late}")
+    print(f"  alcohol         needs latency+RHR+HRV all degraded (or 2/3 with an evening "
+          f"alcohol calendar event — you had {int(evening_alcohol or 0)} such events); "
+          f"HRV days: {days_with('hrv_rmssd')}, RHR days: {days_with('resting_hr')}")
+    print("  sick            needs RHR +15% AND HRV -30% two days running (rare by design)")
+    print(f"  sauna           needs 30+ Eight Sleep nights stored (you have {int(es_nights or 0)})")
+    print(f"  calendar_heavy  needs >={settings.calendar_heavy_threshold} events in a day; "
+          f"busiest day had {busiest[1] if busiest else 0}")
 
 
 def _cmd_doctor(args: argparse.Namespace) -> None:

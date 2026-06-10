@@ -118,10 +118,8 @@ def detect_alcohol(session: Session, day: _date) -> InferredEvent | None:
 
 
 def detect_late_workout(session: Session, day: _date) -> InferredEvent | None:
-    """Any Garmin workout ending after 19:00 local time."""
-    workouts = session.scalars(
-        select(Workout).where(Workout.date == day, Workout.source == "garmin")
-    ).all()
+    """Any workout (any source — Whoop records them too) ending after 19:00."""
+    workouts = session.scalars(select(Workout).where(Workout.date == day)).all()
     for w in workouts:
         end = w.end_time
         if end is None:
@@ -133,7 +131,7 @@ def detect_late_workout(session: Session, day: _date) -> InferredEvent | None:
                 value=None,
                 confidence="inferred",
                 notes=f"{w.sport_type or 'workout'} ended {local_end:%H:%M} local",
-                source="inferred_garmin",
+                source=f"inferred_{w.source}",
             )
     return None
 
@@ -325,15 +323,22 @@ def canonical_or_eight_sleep(session: Session, day: _date):
 
 
 def _skin_temp_series(raw: dict) -> list[float]:
+    """Skin-temp curve from an Eight Sleep session payload.
+
+    The pod nests series under ``timeseries`` as [timestamp, value] pairs;
+    prefer actual skin temp, fall back to bed temp (correlated), and never
+    substitute non-thermal series.
+    """
+    ts = raw.get("timeseries") or {}
+    for key in ("tempSkinC", "tempBedC"):
+        series = ts.get(key)
+        if isinstance(series, list) and series:
+            return [float(p[1]) for p in series if isinstance(p, (list, tuple)) and len(p) == 2]
+    # Older/flat payload shapes: plain list of floats at the top level.
     for key in ("tempSkinC", "skinTemp", "skin_temp"):
         series = raw.get(key)
-        if isinstance(series, list):
+        if isinstance(series, list) and series:
             return [float(x) for x in series if isinstance(x, (int, float))]
-    # Some payloads nest timeseries under "timeseries".
-    ts = raw.get("timeseries") or {}
-    series = ts.get("tempBedC") or ts.get("tnt")
-    if isinstance(series, list):
-        return [float(p[1]) for p in series if isinstance(p, (list, tuple)) and len(p) == 2]
     return []
 
 

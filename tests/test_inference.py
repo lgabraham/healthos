@@ -74,3 +74,39 @@ def test_late_workout_detection(session):
     session.commit()
     written = run_inference_for_date(session, target)
     assert "late_workout" in written
+
+
+def test_skin_temp_series_reads_nested_pairs():
+    """The pod nests series under timeseries as [ts, value] pairs; the helper
+    must read skin temp (or bed temp), never toss-and-turn counts."""
+    from healthos.inference.behavioral import _skin_temp_series
+
+    raw = {
+        "timeseries": {
+            "tempSkinC": [["t1", 34.1], ["t2", 35.0], ["t3", 33.8]],
+            "tnt": [["t1", 2], ["t2", 1]],
+        }
+    }
+    assert _skin_temp_series(raw) == [34.1, 35.0, 33.8]
+    # Bed temp fallback when skin temp absent.
+    raw2 = {"timeseries": {"tempBedC": [["t1", 27.0]], "tnt": [["t1", 9]]}}
+    assert _skin_temp_series(raw2) == [27.0]
+    # tnt alone must NOT be mistaken for temperature.
+    assert _skin_temp_series({"timeseries": {"tnt": [["t1", 9]]}}) == []
+
+
+def test_late_workout_any_source(session):
+    from datetime import datetime, timedelta as td
+
+    from healthos.config import settings
+    from healthos.inference.behavioral import detect_late_workout
+    from healthos.models import Workout
+
+    d = date(2026, 6, 8)
+    end = datetime(2026, 6, 8, 20, 30, tzinfo=settings.tz)
+    session.add(Workout(date=d, source="whoop", sport_type="run",
+                        start_time=end - td(hours=1), end_time=end))
+    session.commit()
+    ev = detect_late_workout(session, d)
+    assert ev is not None
+    assert ev.source == "inferred_whoop"
