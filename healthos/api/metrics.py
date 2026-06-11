@@ -311,7 +311,7 @@ def metric_sources(
     Answers 'what does each device actually give me' — broader than the
     fixed-row coverage heatmap (includes body_battery, vo2_max, tss, etc.).
     """
-    from ..canonical import CANONICAL_METRIC_SOURCE
+    from ..canonical import CANONICAL_METRIC_SOURCE, source_rank
     from ..models import DailyMetric
 
     end = _latest_date_any(db)
@@ -346,12 +346,36 @@ def metric_sources(
         ]
         # Canonical first, then by coverage.
         src_list.sort(key=lambda s: (not s["canonical"], -s["days"]))
+
+        # The resolution rule, made explicit for the build phase: canonical
+        # wins when present; otherwise the best-ranked fallback present that day
+        # (FALLBACK_PRIORITY). Show the fallback order among sources that
+        # actually feed THIS metric, and who wins on the most recent day.
+        present = set(sources)
+        fallback_order = sorted(
+            (s for s in present if s != canonical_src), key=source_rank
+        )
+        metric_last = max(info["last"] for info in sources.values())
+        present_on_last = {s for s, info in sources.items() if info["last"] == metric_last}
+        if canonical_src in present_on_last:
+            winner = canonical_src
+        else:
+            winner = min(present_on_last, key=source_rank)
+
         out.append(
             {
                 "metric": metric,
                 "canonical_source": canonical_src,
                 "total_days": len({d for info in sources.values() for d in info["dates"]}),
                 "sources": src_list,
+                "resolution": {
+                    "canonical": canonical_src,
+                    "fallback_order": fallback_order,
+                    "zero_is_missing": metric in ZERO_IS_MISSING,
+                    "current_winner": winner,
+                    "current_winner_is_fallback": winner != canonical_src,
+                    "as_of": metric_last.isoformat(),
+                },
             }
         )
     return {"days": days, "window_days": (end - start).days + 1, "metrics": out}

@@ -379,3 +379,8 @@ body {
   height: 7px;
   border-radius: 1px;
 }
+.dm-rule {
+  margin-top: 0.2rem;
+  font-size: 0.66rem;
+  color: var(--muted);
+}

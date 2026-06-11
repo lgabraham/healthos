@@ -164,3 +164,11 @@ def test_metric_sources_matrix(session, client):
     assert by_src["eight_sleep"]["days"] == 5
     assert by_src["garmin"]["days"] == 2  # the zero is excluded
     assert hrv["sources"][0]["source"] == "whoop"  # canonical first
+    # Resolution logic surfaced for the build phase.
+    res = hrv["resolution"]
+    assert res["canonical"] == "whoop"
+    assert res["zero_is_missing"] is True
+    assert res["fallback_order"] == ["eight_sleep", "garmin"]  # priority order
+    # Whoop has the latest day -> it wins; not a fallback.
+    assert res["current_winner"] == "whoop"
+    assert res["current_winner_is_fallback"] is False

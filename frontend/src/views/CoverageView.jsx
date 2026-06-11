@@ -50,6 +50,18 @@ function mlabel(m) {
   return LABELS[m] || m.replace(/_/g, " ");
 }
 
+// Plain-English statement of how the winning value is chosen for a metric.
+function resolutionRule({ resolution: r }) {
+  if (!r) return null;
+  const canon = r.canonical || "(no canonical owner)";
+  const chain = r.fallback_order.length ? ` → else ${r.fallback_order.join(" → ")}` : "";
+  const zero = r.zero_is_missing ? " · 0 = missing" : "";
+  const win = r.current_winner
+    ? ` · now winning: ${r.current_winner}${r.current_winner_is_fallback ? " (fallback)" : ""} as of ${r.as_of}`
+    : "";
+  return `wins: ${canon}${chain}${zero}${win}`;
+}
+
 // Device-by-metric matrix: every metric and which gadgets feed it. The
 // canonical source is starred; fallbacks show their day-count so you can see,
 // e.g., HRV = Whoop 40d (canonical) + Eight Sleep 18d + Garmin 30d.
@@ -87,6 +99,7 @@ function DeviceMatrix() {
                     </span>
                   ))}
                 </div>
+                <div className="dm-rule">{resolutionRule(row)}</div>
               </td>
             </tr>
           ))}
