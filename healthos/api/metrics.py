@@ -20,6 +20,7 @@ from ..database import db_session
 from ..models import CalendarEvent, DailyEvent, SleepSession, SyncLog, Workout
 from ..queries import (
     MIN_INFERENCE_DAYS,
+    ZERO_IS_MISSING,
     best_available,
     best_available_sleep,
     data_day_count,
@@ -297,6 +298,63 @@ def attribution_endpoint(
 
 
 CONCORDANCE_METRICS = {"hrv_rmssd", "resting_hr", "sleep_duration_minutes"}
+
+
+@router.get("/metric-sources")
+def metric_sources(
+    days: int = Query(default=90, ge=7, le=365),
+    db: Session = Depends(db_session),
+) -> dict:
+    """Device-by-metric matrix: for EVERY metric we store, which sources feed
+    it, how many days each covers, which is canonical, and how fresh it is.
+
+    Answers 'what does each device actually give me' — broader than the
+    fixed-row coverage heatmap (includes body_battery, vo2_max, tss, etc.).
+    """
+    from ..canonical import CANONICAL_METRIC_SOURCE
+    from ..models import DailyMetric
+
+    end = _latest_date_any(db)
+    start = end - timedelta(days=days)
+    rows = db.execute(
+        select(DailyMetric.metric, DailyMetric.source, DailyMetric.date, DailyMetric.value)
+        .where(DailyMetric.date >= start, DailyMetric.date <= end)
+    ).all()
+
+    # metric -> source -> {dates set, last date}
+    agg: dict[str, dict[str, dict]] = {}
+    for metric, source, d, value in rows:
+        if value is None or (metric in ZERO_IS_MISSING and value <= 0):
+            continue
+        s = agg.setdefault(metric, {}).setdefault(source, {"dates": set(), "last": d})
+        s["dates"].add(d)
+        if d > s["last"]:
+            s["last"] = d
+
+    out = []
+    for metric, sources in sorted(agg.items()):
+        canonical_src = CANONICAL_METRIC_SOURCE.get(metric)
+        src_list = [
+            {
+                "source": src,
+                "days": len(info["dates"]),
+                "canonical": src == canonical_src,
+                "last_date": info["last"].isoformat(),
+                "days_behind": (end - info["last"]).days,
+            }
+            for src, info in sources.items()
+        ]
+        # Canonical first, then by coverage.
+        src_list.sort(key=lambda s: (not s["canonical"], -s["days"]))
+        out.append(
+            {
+                "metric": metric,
+                "canonical_source": canonical_src,
+                "total_days": len({d for info in sources.values() for d in info["dates"]}),
+                "sources": src_list,
+            }
+        )
+    return {"days": days, "window_days": (end - start).days + 1, "metrics": out}
 
 
 @router.get("/concordance")

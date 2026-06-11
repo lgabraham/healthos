@@ -136,3 +136,31 @@ def test_concordance_endpoint(session, client):
 
     bad = client.get("/api/concordance?metric=bogus&days=30").json()
     assert "error" in bad
+
+
+def test_metric_sources_matrix(session, client):
+    """Device-by-metric breakdown: per-source day counts, canonical flag,
+    freshness; zero-impossible placeholders excluded."""
+    for i in range(5):
+        d = DAY - timedelta(days=i)
+        session.add(DailyMetric(date=d, metric="hrv_rmssd", value=40, unit="ms",
+                                source="whoop", is_canonical=True))
+        session.add(DailyMetric(date=d, metric="hrv_rmssd", value=44, unit="ms",
+                                source="eight_sleep", is_canonical=False))
+    # Garmin HRV on 2 of those days + a placeholder 0 that must NOT count.
+    session.add(DailyMetric(date=DAY, metric="hrv_rmssd", value=38, unit="ms",
+                            source="garmin", is_canonical=False))
+    session.add(DailyMetric(date=DAY - timedelta(days=1), metric="hrv_rmssd", value=39,
+                            unit="ms", source="garmin", is_canonical=False))
+    session.add(DailyMetric(date=DAY - timedelta(days=2), metric="hrv_rmssd", value=0,
+                            unit="ms", source="garmin", is_canonical=False))
+    session.commit()
+    body = client.get("/api/metric-sources?days=30").json()
+    hrv = next(m for m in body["metrics"] if m["metric"] == "hrv_rmssd")
+    assert hrv["canonical_source"] == "whoop"
+    assert hrv["total_days"] == 5
+    by_src = {s["source"]: s for s in hrv["sources"]}
+    assert by_src["whoop"]["days"] == 5 and by_src["whoop"]["canonical"] is True
+    assert by_src["eight_sleep"]["days"] == 5
+    assert by_src["garmin"]["days"] == 2  # the zero is excluded
+    assert hrv["sources"][0]["source"] == "whoop"  # canonical first

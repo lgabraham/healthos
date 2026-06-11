@@ -27,10 +27,74 @@ const LABELS = {
   resting_hr: "Resting HR",
   strain_score: "Strain",
   sleep_duration_minutes: "Sleep",
+  rem_sleep_minutes: "REM sleep",
+  deep_sleep_minutes: "Deep sleep",
+  light_sleep_minutes: "Light sleep",
+  awake_minutes: "Awake",
+  sleep_efficiency: "Sleep efficiency",
   respiratory_rate: "Resp. rate",
   spo2: "SpO₂",
   steps: "Steps",
+  vo2_max: "VO₂ max",
+  training_load: "Training load",
+  tss: "TSS",
+  body_battery: "Body Battery",
+  stress_avg: "Stress",
+  exercise_hr: "Exercise HR",
+  bed_temp: "Bed temp",
+  skin_temp: "Skin temp",
+  room_temp: "Room temp",
+  toss_turn_count: "Toss & turn",
 };
+function mlabel(m) {
+  return LABELS[m] || m.replace(/_/g, " ");
+}
+
+// Device-by-metric matrix: every metric and which gadgets feed it. The
+// canonical source is starred; fallbacks show their day-count so you can see,
+// e.g., HRV = Whoop 40d (canonical) + Eight Sleep 18d + Garmin 30d.
+function DeviceMatrix() {
+  const { data, loading, error } = useHealthData(() => api.metricSources(90), []);
+  if (loading) return <div className="muted mono">loading…</div>;
+  if (error) return <div className="error">error: {error}</div>;
+  if (!data?.metrics?.length) return null;
+  return (
+    <div className="panel" style={{ marginBottom: "0.85rem", overflowX: "auto" }}>
+      <div className="label">Devices by metric · last {data.window_days} days · ★ canonical</div>
+      <table className="devmatrix">
+        <tbody>
+          {data.metrics.map((row) => (
+            <tr key={row.metric}>
+              <td className="dm-metric">{mlabel(row.metric)}</td>
+              <td className="dm-total">{row.total_days}d</td>
+              <td>
+                <div className="dm-sources">
+                  {row.sources.map((s) => (
+                    <span
+                      key={s.source}
+                      className="dm-chip"
+                      title={`${s.source}: ${s.days} days · last ${s.last_date}${
+                        s.days_behind > 2 ? ` (${s.days_behind}d behind)` : ""
+                      }`}
+                      style={{
+                        borderColor: color(s.source),
+                        opacity: s.days_behind > 7 ? 0.5 : 1,
+                      }}
+                    >
+                      <i style={{ background: color(s.source) }} />
+                      {s.canonical ? "★ " : ""}
+                      {s.source} {s.days}d
+                    </span>
+                  ))}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 function color(source) {
   return source ? SOURCE_COLOR[source] || "#777" : "#161616";
@@ -141,6 +205,7 @@ export default function CoverageView() {
       <div className="statusline" style={{ marginBottom: "0.8rem" }}>
         data coverage · last {dates.length} days · who filled each cell
       </div>
+      <DeviceMatrix />
       <div className="panel" style={{ overflowX: "auto" }}>
         <div className="cov-row" aria-hidden="true">
           <span className="cov-label" />

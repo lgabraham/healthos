@@ -335,3 +335,47 @@ body {
   overflow: visible;
   white-space: nowrap;
 }
+
+/* Device-by-metric matrix --------------------------------------------------*/
+.devmatrix {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+}
+.devmatrix td {
+  padding: 0.28rem 0.5rem 0.28rem 0;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.dm-metric {
+  color: var(--text);
+  white-space: nowrap;
+}
+.dm-total {
+  color: var(--muted);
+  text-align: right;
+  white-space: nowrap;
+  padding-right: 0.9rem !important;
+}
+.dm-sources {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.dm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.dm-chip i {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+}

@@ -25,4 +25,5 @@ export const api = {
   attribution: (date) => get(`/api/attribution${date ? `?date=${date}` : ""}`),
   syncLog: () => get("/api/sync-log"),
   concordance: (metric, days) => get(`/api/concordance?metric=${metric}&days=${days}`),
+  metricSources: (days) => get(`/api/metric-sources?days=${days}`),
 };
