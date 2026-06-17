@@ -116,7 +116,9 @@ def test_fetch_and_normalize_intervals():
     assert round(by_metric["bed_temp"], 2) == 19.99  # avg(18.61, 21.37)
     assert "room_temp" in by_metric
     assert by_metric["hrv_rmssd"] == 35.0  # avg(30, 40) — non-canonical fallback
-    assert by_metric["resting_hr"] == 48.0  # min of the HR series
+    # Resting HR ≈ mean of the lowest decile (>=3 samples): mean(48,52)=50,
+    # not the bare minimum of 48 — matches the "settled low" resting definition.
+    assert by_metric["resting_hr"] == 50.0
 
 
 def test_missing_credentials_raise(monkeypatch):

@@ -215,7 +215,7 @@ def normalize(sessions: list[dict]) -> tuple[list[SleepRecord], list[MetricPoint
         # Whoop has a gap. rmssd ~ HRV; resting HR ~ the night's low.
         hrv = _avg(_series_values(ts, "rmssd"))
         hr_series = _series_values(ts, "heartRate")
-        resting_hr = round(min(hr_series)) if hr_series else None
+        resting_hr = _resting_hr(hr_series)
 
         sleeps.append(
             SleepRecord(
@@ -269,6 +269,20 @@ def _stage_durations(stages: list[dict]) -> dict[str, int]:
     out = {k: round(v / 60) for k, v in buckets.items()}
     out["total"] = sum(out.get(k, 0) for k in ("rem", "deep", "light"))
     return out
+
+
+def _resting_hr(hr_series: list[float]) -> int | None:
+    """Approximate a *resting* HR: the mean of the lowest ~decile of samples,
+    not the single lowest blip. The bare minimum reads a beat or two below
+    both the Eight Sleep app's resting figure and Whoop's (our canonical RHR),
+    which both use a settled-low average — this keeps the fallback on the same
+    footing as the source it stands in for. Cadence-independent."""
+    if not hr_series:
+        return None
+    vals = sorted(hr_series)
+    k = max(3, len(vals) // 10)  # lowest ~10%, but at least a few samples
+    low = vals[:k]
+    return round(sum(low) / len(low))
 
 
 def _avg(series) -> float | None:
