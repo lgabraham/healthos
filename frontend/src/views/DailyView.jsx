@@ -3,6 +3,7 @@ import { api } from "../api.js";
 import { useHealthData } from "../hooks/useHealthData.js";
 import RecoveryScore from "../components/RecoveryScore.jsx";
 import MetricStat from "../components/MetricStat.jsx";
+import HeroMetric from "../components/HeroMetric.jsx";
 import SleepCard from "../components/SleepCard.jsx";
 import EventTimeline from "../components/EventTimeline.jsx";
 import CalendarStrip from "../components/CalendarStrip.jsx";
@@ -23,8 +24,12 @@ function daysAgo(iso, ref) {
   return Math.round((new Date(`${ref}T00:00:00`) - new Date(`${iso}T00:00:00`)) / 86400000);
 }
 
-// A stale canonical source quietly degrades half the app (estimated recovery,
-// fallback HRV, missing strain). Name it, date it, and print the fix.
+// Trailing slice of a trend series ending ON the viewed date (so the hero
+// sparkline reflects the day you're looking at, not just the newest data).
+function trendUpTo(trend, date, n = 21) {
+  return (trend?.series || []).filter((d) => d.date <= date).slice(-n);
+}
+
 function DataHealthBanner({ status }) {
   const [dismissed, setDismissed] = useState(false);
   if (!status?.sources || dismissed) return null;
@@ -48,16 +53,60 @@ function DataHealthBanner({ status }) {
   );
 }
 
+// Compact "time asleep last night" hero — total duration big, stages as a thin
+// bar, source labeled when it's a fallback (pod) rather than Whoop.
+function HeroSleep({ sleep }) {
+  if (!sleep) {
+    return (
+      <div className="panel hero">
+        <div className="label">Time asleep</div>
+        <div className="metric-value xl" style={{ color: "var(--muted)" }}>—</div>
+        <div className="metric-sub">no sleep recorded last night</div>
+      </div>
+    );
+  }
+  const segs = [
+    { cls: "seg-deep", min: sleep.deep_minutes },
+    { cls: "seg-rem", min: sleep.rem_minutes },
+    { cls: "seg-light", min: sleep.light_minutes },
+    { cls: "seg-awake", min: sleep.awake_minutes },
+  ];
+  const total = segs.reduce((a, s) => a + (s.min || 0), 0) || 1;
+  const sub =
+    sleep.source !== "whoop"
+      ? `via ${sleep.source} (fallback)`
+      : sleep.sleep_score
+        ? `whoop · score ${num(sleep.sleep_score)}`
+        : "whoop";
+  return (
+    <div className="panel hero">
+      <div className="label">Time asleep</div>
+      <div className="metric-value xl">{hm(sleep.total_minutes)}</div>
+      <div className="metric-sub">{sub}</div>
+      <div className="hero-trend">
+        {segs.some((s) => s.min) && (
+          <div className="sleepbar" style={{ margin: 0 }}>
+            {segs.map((s) => (
+              <span key={s.cls} className={s.cls} style={{ width: `${((s.min || 0) / total) * 100}%` }} />
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function DailyView() {
   const [date, setDate] = useState(null); // null = latest complete day (server picks)
+  const [showAll, setShowAll] = useState(false);
   const { data: daily, loading, error } = useHealthData(() => api.daily(date), [date]);
   const { data: hrvTrend } = useHealthData(() => api.trend("hrv_rmssd", 30, 7), []);
+  const { data: rhrTrend } = useHealthData(() => api.trend("resting_hr", 30, 7), []);
   const { data: status } = useHealthData(() => api.status(), []);
 
   const today = todayISO();
   const atToday = daily && daily.date >= today;
 
-  // Keyboard: ←/→ move a day, t jumps to today. Suits the terminal aesthetic.
   useEffect(() => {
     const onKey = (ev) => {
       if (ev.target.tagName === "INPUT" || !daily) return;
@@ -69,14 +118,11 @@ export default function DailyView() {
     return () => window.removeEventListener("keydown", onKey);
   }, [daily, atToday]);
 
-  // First load only: bare loader. After that, keep the layout mounted and dim
-  // it while fetching, so rapid arrow clicks aren't eaten by an unmount.
   if (!daily && loading) return <div className="muted mono">loading…</div>;
   if (error) return <div className="error">error: {error}</div>;
   if (!daily) return null;
 
   const m = daily.metrics;
-  const spark = (hrvTrend?.series || []).map((d) => d.value);
   const wk = daily.last_workout;
   const wkAge = wk ? daysAgo(wk.date, daily.date) : null;
   const wkStale = wkAge != null && wkAge > 7;
@@ -91,9 +137,7 @@ export default function DailyView() {
       )}
 
       <div className="datenav">
-        <button onClick={() => setDate(shiftDate(daily.date, -1))} aria-label="previous day">
-          ‹
-        </button>
+        <button onClick={() => setDate(shiftDate(daily.date, -1))} aria-label="previous day">‹</button>
         <span className="mono">
           {daily.date}
           {date === null && <span className="muted"> · latest complete day</span>}
@@ -103,72 +147,83 @@ export default function DailyView() {
           aria-label="next day"
           disabled={atToday}
           style={atToday ? { opacity: 0.3, cursor: "default" } : undefined}
-        >
-          ›
-        </button>
-        <button className="ghost" onClick={() => setDate(today)} disabled={daily.date === today}>
-          today
-        </button>
-        <button className="ghost" onClick={() => setDate(null)} disabled={date === null}>
-          latest
-        </button>
-        <span className="muted mono" style={{ fontSize: "0.7rem", marginLeft: "0.5rem" }}>
-          ← → t
-        </span>
+        >›</button>
+        <button className="ghost" onClick={() => setDate(today)} disabled={daily.date === today}>today</button>
+        <button className="ghost" onClick={() => setDate(null)} disabled={date === null}>latest</button>
+        <span className="muted mono" style={{ fontSize: "0.7rem", marginLeft: "0.5rem" }}>← → t</span>
       </div>
 
       <div style={loading ? { opacity: 0.45, pointerEvents: "none" } : undefined}>
-        <div className="grid cols-4">
-          <RecoveryScore metric={m.recovery_score} />
-          <MetricStat
+        {/* The three headline signals. Everything else lives under the toggle. */}
+        <div className="grid cols-3">
+          <HeroMetric
             label="HRV (nocturnal)"
             metric={m.hrv_rmssd}
             unit="ms"
-            spark={spark}
-            sparkLabel="last 30d (latest, not this date)"
+            trend={trendUpTo(hrvTrend, daily.date)}
+            color="#f59e0b"
           />
-          <MetricStat label="Resting HR" metric={m.resting_hr} unit="bpm" />
-          <MetricStat label="Strain" metric={m.strain_score} digits={1} neutral />
+          <HeroMetric
+            label="Resting HR"
+            metric={m.resting_hr}
+            unit="bpm"
+            trend={trendUpTo(rhrTrend, daily.date)}
+            color="#38bdf8"
+          />
+          <HeroSleep sleep={daily.sleep} />
         </div>
 
-        <div className="grid" style={{ marginTop: "0.85rem" }}>
-          <AttributionPanel date={daily.date} />
-        </div>
+        <button className="section-toggle" onClick={() => setShowAll((s) => !s)}>
+          {showAll ? "▾ hide full breakdown" : "▸ full breakdown"}
+        </button>
 
-        <div className="grid cols-2" style={{ marginTop: "0.85rem" }}>
-          <SleepCard sleep={daily.sleep} />
-          <EventTimeline events={daily.events} title="Inferred / confirmed events" />
-        </div>
+        {showAll && (
+          <>
+            <div className="grid cols-3">
+              <RecoveryScore metric={m.recovery_score} />
+              <MetricStat label="Strain" metric={m.strain_score} digits={1} neutral />
+              <MetricStat label="Steps" metric={m.steps} neutral />
+            </div>
 
-        <div className="grid" style={{ marginTop: "0.85rem" }}>
-          <CalendarStrip events={daily.calendar} viewDate={daily.date} />
-        </div>
+            <div className="grid" style={{ marginTop: "0.85rem" }}>
+              <AttributionPanel date={daily.date} />
+            </div>
 
-        <div className="grid cols-2" style={{ marginTop: "0.85rem" }}>
-          <MetricStat label="Steps" metric={m.steps} neutral />
-          <div className="panel" style={wkStale ? { opacity: 0.6 } : undefined}>
-            <div className="label">Last workout</div>
-            {wk ? (
-              <>
-                <div className="metric-value" style={{ fontSize: "1.2rem" }}>
-                  {wk.sport_type || "workout"}
-                </div>
-                <div className="metric-sub">
-                  {wk.date}
-                  {wkAge != null &&
-                    ` (${wkAge === 0 ? "this day" : wkAge === 1 ? "1 day before" : `${wkAge} days before`})`}
-                  {" · "}
-                  {hm(wk.duration_minutes)} · avg {num(wk.hr_avg)}bpm · max {num(wk.hr_max)}bpm
-                  {wk.distance_km != null ? ` · ${num(wk.distance_km, 1)}km` : ""}
-                  {wk.calories != null ? ` · ${num(wk.calories)} cal` : ""}
-                  {wk.tss != null ? ` · TSS ${num(wk.tss)}` : ""}
-                </div>
-              </>
-            ) : (
-              <div className="metric-sub">No recent workout.</div>
-            )}
-          </div>
-        </div>
+            <div className="grid cols-2" style={{ marginTop: "0.85rem" }}>
+              <SleepCard sleep={daily.sleep} />
+              <EventTimeline events={daily.events} title="Inferred / confirmed events" />
+            </div>
+
+            <div className="grid" style={{ marginTop: "0.85rem" }}>
+              <CalendarStrip events={daily.calendar} viewDate={daily.date} />
+            </div>
+
+            <div className="grid" style={{ marginTop: "0.85rem" }}>
+              <div className="panel" style={wkStale ? { opacity: 0.6 } : undefined}>
+                <div className="label">Last workout</div>
+                {wk ? (
+                  <>
+                    <div className="metric-value" style={{ fontSize: "1.2rem" }}>
+                      {wk.sport_type || "workout"}
+                    </div>
+                    <div className="metric-sub">
+                      {wk.date}
+                      {wkAge != null &&
+                        ` (${wkAge === 0 ? "this day" : wkAge === 1 ? "1 day before" : `${wkAge} days before`})`}
+                      {" · "}
+                      {hm(wk.duration_minutes)} · avg {num(wk.hr_avg)}bpm · max {num(wk.hr_max)}bpm
+                      {wk.distance_km != null ? ` · ${num(wk.distance_km, 1)}km` : ""}
+                      {wk.calories != null ? ` · ${num(wk.calories)} cal` : ""}
+                      {wk.tss != null ? ` · TSS ${num(wk.tss)}` : ""}
+                    </div>
+                  </>
+                ) : (
+                  <div className="metric-sub">No recent workout.</div>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </>
   );
