@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "./api.js";
 import { useHealthData } from "./hooks/useHealthData.js";
 import DailyView from "./views/DailyView.jsx";
@@ -24,6 +24,46 @@ function StatusLine() {
       {data.data_days}d data · tz {data.timezone}
       {last ? ` · last sync ${last.source}/${last.status}` : " · no sync yet"}
     </span>
+  );
+}
+
+// Re-pull recent days (replace mode) so upstream edits/deletions — e.g. an
+// Eight Sleep session you removed because a kid was in the bed — take effect.
+// Fires the background sync, polls until done, then reloads to show fresh data.
+function RefreshButton() {
+  const [state, setState] = useState("idle"); // idle | syncing | done | error
+  const poll = useRef(null);
+  useEffect(() => () => clearInterval(poll.current), []);
+
+  const start = async () => {
+    if (state === "syncing") return;
+    setState("syncing");
+    const r = await api.triggerSync(7).catch(() => ({ started: false }));
+    if (!r.started) {
+      // Another sync already running — just poll it to completion.
+    }
+    poll.current = setInterval(async () => {
+      const s = await api.syncStatus().catch(() => null);
+      if (s && !s.running) {
+        clearInterval(poll.current);
+        setState(s.error ? "error" : "done");
+        if (!s.error) setTimeout(() => window.location.reload(), 600);
+      }
+    }, 1500);
+  };
+
+  const label = { idle: "↻ refresh", syncing: "syncing…", done: "✓ updated", error: "✗ failed" }[
+    state
+  ];
+  return (
+    <button
+      className="refresh"
+      onClick={start}
+      disabled={state === "syncing"}
+      title="Re-pull the last 7 days from all devices (reflects deleted/edited sessions)"
+    >
+      {label}
+    </button>
   );
 }
 
@@ -57,7 +97,10 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <StatusLine />
+        <div style={{ display: "flex", alignItems: "center", gap: "0.7rem" }}>
+          <StatusLine />
+          <RefreshButton />
+        </div>
       </div>
       <Active />
     </div>

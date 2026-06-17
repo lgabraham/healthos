@@ -172,3 +172,68 @@ def test_metric_sources_matrix(session, client):
     # Whoop has the latest day -> it wins; not a fallback.
     assert res["current_winner"] == "whoop"
     assert res["current_winner_is_fallback"] is False
+
+
+def test_replace_mode_mirrors_upstream_deletion(session, monkeypatch):
+    """A re-sync in replace mode drops a stale session the provider no longer
+    returns (the 'kid slept in my bed, I deleted it' case)."""
+    from datetime import date as _d
+
+    from healthos.models import DailyMetric, SleepSession
+    from healthos.sync import runner
+
+    d = _d(2026, 6, 8)
+    # Pre-existing bad Eight Sleep night already in the DB.
+    session.add(SleepSession(date=d, source="eight_sleep", total_minutes=300,
+                             is_canonical=False))
+    session.add(DailyMetric(date=d, metric="hrv_rmssd", value=99, unit="ms",
+                            source="eight_sleep", is_canonical=False))
+    session.commit()
+
+    # Provider now returns NOTHING for the window (user deleted the session).
+    monkeypatch.setitem(runner.SOURCES, "eight_sleep", (lambda s, e: {}, "eight_sleep"))
+    runner.sync_source("eight_sleep", d, d, sync_type="manual", replace=True)
+
+    from sqlalchemy import select
+    left_metrics = session.scalars(
+        select(DailyMetric).where(DailyMetric.source == "eight_sleep", DailyMetric.date == d)
+    ).all()
+    left_sleeps = session.scalars(
+        select(SleepSession).where(SleepSession.source == "eight_sleep", SleepSession.date == d)
+    ).all()
+    assert left_metrics == [] and left_sleeps == []  # stale night gone
+
+
+def test_replace_mode_leaves_other_sources_untouched(session, monkeypatch):
+    from datetime import date as _d
+
+    from healthos.models import DailyMetric
+    from healthos.sync import runner
+
+    d = _d(2026, 6, 8)
+    session.add(DailyMetric(date=d, metric="hrv_rmssd", value=40, unit="ms",
+                            source="whoop", is_canonical=True))
+    session.commit()
+    monkeypatch.setitem(runner.SOURCES, "eight_sleep", (lambda s, e: {}, "eight_sleep"))
+    runner.sync_source("eight_sleep", d, d, sync_type="manual", replace=True)
+    from sqlalchemy import select
+    assert session.scalars(
+        select(DailyMetric).where(DailyMetric.source == "whoop")
+    ).all()  # whoop survives an eight_sleep replace
+
+
+def test_sync_trigger_and_status(session, client, monkeypatch):
+    import time
+
+    from healthos.sync import runner
+
+    monkeypatch.setattr(runner, "manual_sync", lambda **kw: [])
+    r = client.post("/api/sync?days=3").json()
+    assert r["started"] is True
+    for _ in range(20):
+        st = client.get("/api/sync/status").json()
+        if not st["running"]:
+            break
+        time.sleep(0.1)
+    assert st["running"] is False
+    assert st["error"] is None

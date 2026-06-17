@@ -384,3 +384,24 @@ body {
   font-size: 0.66rem;
   color: var(--muted);
 }
+
+/* Refresh button -----------------------------------------------------------*/
+.refresh {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  padding: 0.3rem 0.6rem;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.refresh:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.refresh:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

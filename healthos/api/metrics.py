@@ -7,6 +7,7 @@ are converted to local time here so the frontend can render them directly.
 
 from __future__ import annotations
 
+import threading
 from datetime import date as _date
 from datetime import timedelta
 
@@ -264,6 +265,59 @@ def correlations(
     db: Session = Depends(db_session),
 ) -> list[dict]:
     return prebuilt_cards(db, days)
+
+
+# Module-level sync state so the refresh button can fire-and-poll without
+# blocking the request (and without two syncs stomping each other).
+_sync_lock = threading.Lock()
+_sync_state: dict = {"running": False, "started_at": None, "finished_at": None,
+                     "results": None, "error": None}
+
+
+def _run_manual_sync(days: int, source: str | None) -> None:
+    from ..sync.runner import manual_sync
+
+    try:
+        results = manual_sync(days=days, source=source)
+        _sync_state["results"] = [
+            {"source": r.source, "status": r.status, "records": r.records_written,
+             "errors": r.errors}
+            for r in results
+        ]
+        _sync_state["error"] = None
+    except Exception as exc:  # noqa: BLE001
+        _sync_state["error"] = str(exc)
+    finally:
+        _sync_state["finished_at"] = _local(_now())
+        _sync_state["running"] = False
+        if _sync_lock.locked():
+            _sync_lock.release()
+
+
+@router.post("/sync")
+def trigger_sync(
+    days: int = Query(default=7, ge=1, le=90),
+    source: str | None = Query(default=None),
+) -> dict:
+    """Kick a refresh in the background (re-pull + replace recent days). Returns
+    immediately; poll /api/sync/status for completion."""
+    if not _sync_lock.acquire(blocking=False):
+        return {"started": False, "reason": "a sync is already running"}
+    _sync_state.update(running=True, started_at=_local(_now()), finished_at=None,
+                       results=None, error=None)
+    threading.Thread(target=_run_manual_sync, args=(days, source), daemon=True).start()
+    return {"started": True, "days": days, "source": source}
+
+
+@router.get("/sync/status")
+def sync_status() -> dict:
+    return dict(_sync_state)
+
+
+def _now():
+    from datetime import datetime
+
+    return datetime.now(settings.tz)
 
 
 @router.get("/sync-log")

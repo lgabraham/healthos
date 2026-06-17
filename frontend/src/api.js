@@ -26,4 +26,7 @@ export const api = {
   syncLog: () => get("/api/sync-log"),
   concordance: (metric, days) => get(`/api/concordance?metric=${metric}&days=${days}`),
   metricSources: (days) => get(`/api/metric-sources?days=${days}`),
+  triggerSync: (days = 7) =>
+    fetch(`${BASE}/api/sync?days=${days}`, { method: "POST" }).then((r) => r.json()),
+  syncStatus: () => get("/api/sync/status"),
 };

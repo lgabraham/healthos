@@ -34,13 +34,25 @@ SOURCES: dict[str, tuple[Callable[[_date, _date], dict], str]] = {
 }
 
 
-def sync_source(name: str, start: _date, end: _date, sync_type: str = "daily") -> SyncResult:
-    """Pull and persist a single source for the inclusive date range."""
+def sync_source(
+    name: str, start: _date, end: _date, sync_type: str = "daily", replace: bool = False
+) -> SyncResult:
+    """Pull and persist a single source for the inclusive date range.
+
+    When ``replace`` is set, the source's existing rows in the window are
+    deleted before the freshly-pulled data is written — so an upstream deletion
+    (e.g. an Eight Sleep session you removed because a kid was in the bed) is
+    mirrored locally instead of leaving a stale night behind. The delete happens
+    only after a successful pull, in the same transaction as the insert, so a
+    network failure never wipes data without replacing it.
+    """
     pull_fn, source = SOURCES[name]
     result = SyncResult(source=source, sync_type=sync_type)
     try:
-        data = pull_fn(start, end)
+        data = pull_fn(start, end)  # may raise -> nothing is deleted
         with get_session() as session:
+            if replace:
+                _delete_source_window(session, source, start, end)
             written = 0
             written += upsert_metrics(session, data.get("metrics", []))
             written += upsert_sleep(session, data.get("sleeps", []))
@@ -48,13 +60,29 @@ def sync_source(name: str, start: _date, end: _date, sync_type: str = "daily") -
             written += upsert_calendar_events(session, data.get("calendar_events", []))
             result.records_written = written
             write_sync_log(session, result)
-        log.info("Synced %s %s..%s: %d records", source, start, end, result.records_written)
+        log.info("Synced %s %s..%s: %d records%s", source, start, end,
+                 result.records_written, " (replace)" if replace else "")
     except Exception as exc:  # noqa: BLE001 - isolate provider failures
         log.exception("Sync failed for %s", source)
         result.errors.append(str(exc))
         with get_session() as session:
             write_sync_log(session, result)
     return result
+
+
+def _delete_source_window(session, source: str, start: _date, end: _date) -> None:
+    """Drop a source's metrics/sleeps/workouts in [start, end] (inclusive) so a
+    re-pull becomes an exact mirror of the provider, deletions included."""
+    from sqlalchemy import delete
+
+    from ..models import DailyMetric, SleepSession, Workout
+
+    for model in (DailyMetric, SleepSession, Workout):
+        session.execute(
+            delete(model).where(
+                model.source == source, model.date >= start, model.date <= end
+            )
+        )
 
 
 def sync_all(start: _date, end: _date, sync_type: str = "daily") -> list[SyncResult]:
@@ -86,3 +114,18 @@ def daily_sync() -> list[SyncResult]:
     yesterday = today_local - timedelta(days=1)
     log.info("Running nightly sync for %s", yesterday)
     return sync_all(yesterday, yesterday, sync_type="daily")
+
+
+def manual_sync(days: int = 7, source: str | None = None) -> list[SyncResult]:
+    """User-triggered refresh: re-pull the trailing ``days`` (through today) in
+    REPLACE mode so corrections/deletions upstream take effect. One source if
+    given, else all; re-runs inference afterward."""
+    from datetime import datetime, timedelta
+
+    end = datetime.now(settings.tz).date()
+    start = end - timedelta(days=days - 1)
+    names = [source] if source else list(SOURCES)
+    log.info("Manual refresh %s..%s (sources=%s, replace)", start, end, names)
+    results = [sync_source(n, start, end, sync_type="manual", replace=True) for n in names]
+    _run_inference(start, end)
+    return results
