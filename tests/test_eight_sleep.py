@@ -102,6 +102,10 @@ def test_fetch_and_normalize_intervals():
     sleeps, points = es.normalize(sessions)
     assert len(sleeps) == 1
     s = sleeps[0]
+    # ts is 05:45 UTC = 9:45pm Feb 11 PST (bed time); the ~4.5h session ends
+    # the morning of Feb 12, which is the date it must be filed under.
+    assert s.date == date(2023, 2, 12)
+    assert all(p.date == date(2023, 2, 12) for p in points)
     assert s.deep_minutes == 90
     assert s.rem_minutes == 75
     assert s.light_minutes == 60

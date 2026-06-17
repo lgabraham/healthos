@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date as _date
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import httpx
 
@@ -155,10 +155,26 @@ def _parse_dt(ts: str | None) -> datetime | None:
         return None
 
 
-def _local_date(interval: dict) -> _date | None:
+def _session_end(interval: dict) -> datetime | None:
+    """Wake time = start + the full span of stages (incl. awake). Eight Sleep's
+    ``ts`` is bed time (evening); we need wake time so a night maps to the
+    morning it ended."""
     start = _parse_dt(interval.get("ts"))
-    if start is not None:
-        return start.astimezone(settings.tz).date()
+    if start is None:
+        return None
+    total_s = sum((s.get("duration") or 0) for s in interval.get("stages") or [])
+    return start + timedelta(seconds=total_s) if total_s else start
+
+
+def _local_date(interval: dict) -> _date | None:
+    """Date a session by the morning it ENDED, matching Whoop and HealthOS's
+    'a day = the night that ended that morning' rule. Dating by bed time (the
+    raw ``ts``) filed cross-midnight nights a day early and one day off from
+    Whoop — corrupting concordance, fallbacks, and the day you'd look at it on.
+    """
+    end = _session_end(interval)
+    if end is not None:
+        return end.astimezone(settings.tz).date()
     q = interval.get("_query_date") or interval.get("day")
     return _date.fromisoformat(q) if q else None
 
