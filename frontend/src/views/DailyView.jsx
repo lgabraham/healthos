@@ -8,6 +8,7 @@ import SleepCard from "../components/SleepCard.jsx";
 import EventTimeline from "../components/EventTimeline.jsx";
 import CalendarStrip from "../components/CalendarStrip.jsx";
 import AttributionPanel from "../components/AttributionPanel.jsx";
+import DatePicker from "../components/DatePicker.jsx";
 import { hm, num } from "../format.js";
 
 function shiftDate(iso, days) {
@@ -138,10 +139,7 @@ export default function DailyView() {
 
       <div className="datenav">
         <button onClick={() => setDate(shiftDate(daily.date, -1))} aria-label="previous day">‹</button>
-        <span className="mono">
-          {daily.date}
-          {date === null && <span className="muted"> · latest complete day</span>}
-        </span>
+        <DatePicker value={daily.date} onChange={(d) => setDate(d)} max={today} />
         <button
           onClick={() => setDate(shiftDate(daily.date, 1))}
           aria-label="next day"
@@ -150,6 +148,7 @@ export default function DailyView() {
         >›</button>
         <button className="ghost" onClick={() => setDate(today)} disabled={daily.date === today}>today</button>
         <button className="ghost" onClick={() => setDate(null)} disabled={date === null}>latest</button>
+        {date === null && <span className="muted mono" style={{ fontSize: "0.7rem" }}>· latest complete day</span>}
         <span className="muted mono" style={{ fontSize: "0.7rem", marginLeft: "0.5rem" }}>← → t</span>
       </div>
 

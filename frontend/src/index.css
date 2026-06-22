@@ -1,6 +1,41 @@
 /* HealthOS — dark, data-dense, utilitarian-premium. Mission control, not fitness app. */
 @import "tailwindcss";
 
+/* shadcn/ui design tokens, mapped to the existing dark palette so utility
+   classes like bg-popover / text-primary / border-border resolve correctly. */
+@theme {
+  --color-background: #0a0a0a;
+  --color-foreground: #e7e5e4;
+  --color-card: #121212;
+  --color-card-foreground: #e7e5e4;
+  --color-popover: #181818;
+  --color-popover-foreground: #e7e5e4;
+  --color-primary: #f59e0b;
+  --color-primary-foreground: #0a0a0a;
+  --color-secondary: #1f1f1f;
+  --color-secondary-foreground: #e7e5e4;
+  --color-muted: #1f1f1f;
+  --color-muted-foreground: #8a8a8a;
+  --color-accent: #262626;
+  --color-accent-foreground: #e7e5e4;
+  --color-border: #262626;
+  --color-input: #262626;
+  --color-ring: #f59e0b;
+}
+
+/* Dark theming for the react-day-picker calendar (overrides its CSS vars). */
+.rdp-healthos {
+  --rdp-accent-color: #f59e0b;
+  --rdp-accent-background-color: #3a2c0a;
+  --rdp-today-color: #f59e0b;
+  --rdp-range_middle-background-color: #3a2c0a;
+  font-family: var(--mono);
+  color: var(--text);
+}
+.rdp-healthos .rdp-day_button:hover {
+  background: #262626;
+}
+
 :root {
   --bg: #0a0a0a;
   --panel: #121212;
