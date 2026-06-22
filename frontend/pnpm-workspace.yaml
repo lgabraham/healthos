@@ -1,3 +1,7 @@
 # pnpm 10.x moved build-script approval here (out of package.json).
+# These packages ship native binaries via a postinstall step, so pnpm needs
+# explicit approval to run their build scripts (esbuild powers Vite; oxide is
+# Tailwind v4's native engine). Without this, installs fail on the M1 + Vercel.
 onlyBuiltDependencies:
   - esbuild
+  - "@tailwindcss/oxide"
