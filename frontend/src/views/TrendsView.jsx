@@ -13,7 +13,6 @@ const CHARTS = [
     color: "#38bdf8",
     yFormat: (v) => `${Math.floor(v / 60)}h${String(Math.round(v % 60)).padStart(2, "0")}`,
   },
-  { metric: "strain_score", title: "Training strain", color: "#a855f7" },
 ];
 
 function Chart({ metric, title, color, days, yFormat }) {
