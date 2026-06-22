@@ -7,6 +7,7 @@ const RANGES = [30, 60, 90];
 
 const CHARTS = [
   { metric: "hrv_rmssd", title: "HRV (rmssd) · 7-day rolling", color: "#f59e0b" },
+  { metric: "resting_hr", title: "Resting HR · 7-day rolling", color: "#fb7185" },
   {
     metric: "sleep_duration_minutes",
     title: "Sleep duration",
