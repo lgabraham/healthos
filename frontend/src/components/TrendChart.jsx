@@ -5,6 +5,7 @@ import {
   ComposedChart,
   Line,
   ReferenceArea,
+  ReferenceLine,
   ResponsiveContainer,
   Scatter,
   Tooltip,
@@ -79,10 +80,17 @@ export default function TrendChart({ series, events = [], height = 240, color = 
     };
   });
 
-  // "Usual range" channel = interquartile band of the rolling average in view.
+  // Graded "where you fall" channel from the rolling average's distribution:
+  // a darker core (typical, p25–p75) with lighter shoulders (low/high,
+  // p10–p25 & p75–p90) and a dashed median line. Outside p10/p90 = unusual.
   const rollVals = data.map((d) => d.rolling).filter((v) => v != null);
-  const p25 = percentile(rollVals, 0.25);
-  const p75 = percentile(rollVals, 0.75);
+  const q = rollVals.length >= 6 ? {
+    p10: percentile(rollVals, 0.1),
+    p25: percentile(rollVals, 0.25),
+    p50: percentile(rollVals, 0.5),
+    p75: percentile(rollVals, 0.75),
+    p90: percentile(rollVals, 0.9),
+  } : null;
   const gradId = `trendGlow-${color.replace("#", "")}`;
 
   return (
@@ -95,17 +103,13 @@ export default function TrendChart({ series, events = [], height = 240, color = 
           </linearGradient>
         </defs>
         <CartesianGrid stroke="#1f1f1f" vertical={false} />
-        {p25 != null && p75 != null && p75 > p25 && (
-          <ReferenceArea
-            y1={p25}
-            y2={p75}
-            fill={color}
-            fillOpacity={0.06}
-            stroke={color}
-            strokeOpacity={0.12}
-            strokeDasharray="2 3"
-            ifOverflow="extendDomain"
-          />
+        {q && q.p90 > q.p10 && (
+          <>
+            <ReferenceArea y1={q.p10} y2={q.p25} fill={color} fillOpacity={0.06} stroke="none" ifOverflow="extendDomain" />
+            <ReferenceArea y1={q.p25} y2={q.p75} fill={color} fillOpacity={0.16} stroke="none" ifOverflow="extendDomain" />
+            <ReferenceArea y1={q.p75} y2={q.p90} fill={color} fillOpacity={0.06} stroke="none" ifOverflow="extendDomain" />
+            <ReferenceLine y={q.p50} stroke={color} strokeOpacity={0.35} strokeDasharray="3 3" />
+          </>
         )}
         <XAxis dataKey="date" tick={AXIS} minTickGap={28} axisLine={AXIS} tickLine={false} />
         <YAxis tick={AXIS} axisLine={AXIS} tickLine={false} width={48} domain={["auto", "auto"]} tickFormatter={yFormat} />
