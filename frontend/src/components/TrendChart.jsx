@@ -1,8 +1,10 @@
 import {
+  Area,
   Brush,
   CartesianGrid,
   ComposedChart,
   Line,
+  ReferenceArea,
   ResponsiveContainer,
   Scatter,
   Tooltip,
@@ -11,10 +13,19 @@ import {
 } from "recharts";
 import { eventColor, eventMeta } from "../format.js";
 
-// Custom-styled Recharts line chart: raw value (thin) + rolling average (amber),
-// with behavioral events as colored dots riding the value line, and a drag
-// handle (Brush) to scroll/zoom the time window.
+// Custom-styled Recharts chart: raw daily value (thin), a 7d rolling average
+// with a gradient glow, a faint "usual range" channel (your interquartile
+// band), behavioral events as colored dots on the line, and a drag Brush.
 const AXIS = { stroke: "#3f3f46", fontSize: 11, fontFamily: "IBM Plex Mono" };
+
+function percentile(values, p) {
+  if (!values.length) return null;
+  const s = [...values].sort((a, b) => a - b);
+  const idx = (s.length - 1) * p;
+  const lo = Math.floor(idx);
+  const hi = Math.ceil(idx);
+  return s[lo] + (s[hi] - s[lo]) * (idx - lo);
+}
 
 function DarkTooltip({ active, payload, label }) {
   if (!active || !payload?.length) return null;
@@ -68,13 +79,44 @@ export default function TrendChart({ series, events = [], height = 240, color = 
     };
   });
 
+  // "Usual range" channel = interquartile band of the rolling average in view.
+  const rollVals = data.map((d) => d.rolling).filter((v) => v != null);
+  const p25 = percentile(rollVals, 0.25);
+  const p75 = percentile(rollVals, 0.75);
+  const gradId = `trendGlow-${color.replace("#", "")}`;
+
   return (
     <ResponsiveContainer width="100%" height={height}>
       <ComposedChart data={data} margin={{ top: 8, right: 12, bottom: 4, left: -8 }}>
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={color} stopOpacity={0.28} />
+            <stop offset="100%" stopColor={color} stopOpacity={0} />
+          </linearGradient>
+        </defs>
         <CartesianGrid stroke="#1f1f1f" vertical={false} />
+        {p25 != null && p75 != null && p75 > p25 && (
+          <ReferenceArea
+            y1={p25}
+            y2={p75}
+            fill={color}
+            fillOpacity={0.06}
+            stroke={color}
+            strokeOpacity={0.12}
+            strokeDasharray="2 3"
+            ifOverflow="extendDomain"
+          />
+        )}
         <XAxis dataKey="date" tick={AXIS} minTickGap={28} axisLine={AXIS} tickLine={false} />
         <YAxis tick={AXIS} axisLine={AXIS} tickLine={false} width={48} domain={["auto", "auto"]} tickFormatter={yFormat} />
         <Tooltip content={<DarkTooltip />} />
+        <Area
+          type="monotone"
+          dataKey="rolling"
+          stroke="none"
+          fill={`url(#${gradId})`}
+          isAnimationActive={false}
+        />
         <Line
           type="linear"
           dataKey="value"
