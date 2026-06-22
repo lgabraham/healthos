@@ -44,8 +44,14 @@ export default function WorkoutsView() {
     calories: w.calories,
     tss: w.tss,
   }));
+  // Calendar planning/reminder entries that aren't actual workouts.
+  const IGNORE_TITLES = ["plan workout", "workout plan"];
   const planned = (calendar || [])
     .filter((e) => (e.keywords || []).includes("exercise"))
+    .filter((e) => {
+      const t = (e.title || "").toLowerCase();
+      return !IGNORE_TITLES.some((p) => t.includes(p));
+    })
     .map((e) => ({
       kind: "planned",
       date: e.date,
