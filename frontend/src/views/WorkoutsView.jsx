@@ -24,9 +24,12 @@ function fmtTime(iso) {
   }
 }
 
+const STEP_GOAL = 10000;
+
 export default function WorkoutsView() {
   const { data: workouts, loading, error } = useHealthData(() => api.workouts(90), []);
   const { data: calendar } = useHealthData(() => api.calendar(90), []);
+  const { data: steps } = useHealthData(() => api.trend("steps", 90), []);
 
   if (loading) return <div className="muted mono">loading…</div>;
   if (error) return <div className="error">error: {error}</div>;
@@ -60,14 +63,21 @@ export default function WorkoutsView() {
       source: "calendar",
     }));
 
-  const all = [...recorded, ...planned].sort(
+  // 10k+ step days that don't already have a recorded workout — so an active
+  // walking day still shows up in the log instead of being blank.
+  const workoutDates = new Set(recorded.map((r) => r.date));
+  const walked = (steps?.series || [])
+    .filter((d) => d.value != null && d.value >= STEP_GOAL && !workoutDates.has(d.date))
+    .map((d) => ({ kind: "steps", date: d.date, time: null, label: "Walk", source: "steps", steps: d.value }));
+
+  const all = [...recorded, ...planned, ...walked].sort(
     (a, b) => b.date.localeCompare(a.date) || (b.time || "").localeCompare(a.time || ""),
   );
 
   return (
     <>
       <div className="statusline" style={{ marginBottom: "0.8rem" }}>
-        workouts recorded by Garmin/Whoop + exercise events from your calendar · last 90 days
+        workouts (Garmin/Whoop) + calendar exercise + 10k+ step days · last 90 days
       </div>
       {all.length === 0 && (
         <div className="panel">
@@ -112,6 +122,8 @@ export default function WorkoutsView() {
                   {w.calories != null ? ` · ${num(w.calories)} cal` : ""}
                   {w.tss != null ? ` · TSS ${num(w.tss)}` : ""}
                 </>
+              ) : w.kind === "steps" ? (
+                `${Math.round(w.steps).toLocaleString()} steps`
               ) : (
                 <span className="muted">logged in calendar</span>
               )}
