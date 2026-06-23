@@ -27,8 +27,8 @@ function Chart({ metric, title, color, days, yFormat }) {
         <>
           <TrendChart series={data.series} events={data.events} color={color} yFormat={yFormat} />
           <div className="muted mono" style={{ fontSize: "0.66rem", marginTop: "0.3rem" }}>
-            thin gray = daily · colored = 7d avg (breaks at gaps) · dots = detected events · drag
-            the strip to scroll
+            thin gray = daily · solid = 7d avg · dashed = ~4-week baseline (long-term trend) · band
+            = usual range · dots = events
           </div>
         </>
       )}

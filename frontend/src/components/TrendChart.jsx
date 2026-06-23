@@ -5,7 +5,6 @@ import {
   ComposedChart,
   Line,
   ReferenceArea,
-  ReferenceLine,
   ResponsiveContainer,
   Scatter,
   Tooltip,
@@ -15,9 +14,10 @@ import {
 import { eventColor, eventMeta } from "../format.js";
 
 // Custom-styled Recharts chart: raw daily value (thin), a 7d rolling average
-// with a gradient glow, a faint "usual range" channel (your interquartile
-// band), behavioral events as colored dots on the line, and a drag Brush.
+// with a gradient glow, a slow ~4-week baseline line (long-term trend), a
+// graded "usual range" channel, behavioral events as dots, and a drag Brush.
 const AXIS = { stroke: "#3f3f46", fontSize: 11, fontFamily: "IBM Plex Mono" };
+const BASELINE_WINDOW = 28;
 
 function percentile(values, p) {
   if (!values.length) return null;
@@ -26,6 +26,21 @@ function percentile(values, p) {
   const lo = Math.floor(idx);
   const hi = Math.ceil(idx);
   return s[lo] + (s[hi] - s[lo]) * (idx - lo);
+}
+
+// Trailing mean over a window of per-day rows, skipping gaps; null until the
+// window holds enough readings to be meaningful.
+function trailingMean(values, window) {
+  const need = Math.max(4, Math.round(window / 3));
+  const out = [];
+  const buf = [];
+  for (const v of values) {
+    buf.push(v);
+    if (buf.length > window) buf.shift();
+    const present = buf.filter((x) => x != null);
+    out.push(present.length >= need ? present.reduce((a, b) => a + b, 0) / present.length : null);
+  }
+  return out;
 }
 
 function DarkTooltip({ active, payload, label }) {
@@ -43,10 +58,11 @@ function DarkTooltip({ active, payload, label }) {
     >
       <div style={{ color: "#8a8a8a" }}>{label}</div>
       {payload
-        .filter((p) => p.dataKey === "value" || p.dataKey === "rolling")
+        .filter((p) => ["value", "rolling", "baseline"].includes(p.dataKey))
         .map((p) => (
           <div key={p.dataKey} style={{ color: p.color }}>
-            {p.dataKey}: {p.value == null ? "—" : Number(p.value).toFixed(1)}
+            {p.dataKey === "baseline" ? "4wk baseline" : p.dataKey}:{" "}
+            {p.value == null ? "—" : Number(p.value).toFixed(1)}
           </div>
         ))}
       {row.evtLabel && (
@@ -63,31 +79,28 @@ function EventDot(props) {
 }
 
 export default function TrendChart({ series, events = [], height = 240, color = "#f59e0b", yFormat }) {
-  // Bind events into the data rows (Scatter places reliably on a category
-  // axis, unlike ReferenceDot) — the dot rides the value line for that day.
   const evtByDate = {};
   for (const e of events) {
     if (!(e.date in evtByDate)) evtByDate[e.date] = e;
   }
-  const data = series.map((d) => {
+  const base = trailingMean(series.map((d) => d.value), BASELINE_WINDOW);
+  const data = series.map((d, i) => {
     const e = evtByDate[d.date];
     const usable = e && d.value != null;
     return {
       ...d,
+      baseline: base[i] == null ? null : Math.round(base[i] * 10) / 10,
       evtY: usable ? d.value : null,
       evtLabel: usable ? eventMeta(e.event_type).label : null,
       evtColor: usable ? eventColor(e.event_type) : null,
     };
   });
 
-  // Graded "where you fall" channel from the rolling average's distribution:
-  // a darker core (typical, p25–p75) with lighter shoulders (low/high,
-  // p10–p25 & p75–p90) and a dashed median line. Outside p10/p90 = unusual.
+  // Graded "where you fall" channel from the rolling average's distribution.
   const rollVals = data.map((d) => d.rolling).filter((v) => v != null);
   const q = rollVals.length >= 6 ? {
     p10: percentile(rollVals, 0.1),
     p25: percentile(rollVals, 0.25),
-    p50: percentile(rollVals, 0.5),
     p75: percentile(rollVals, 0.75),
     p90: percentile(rollVals, 0.9),
   } : null;
@@ -108,7 +121,6 @@ export default function TrendChart({ series, events = [], height = 240, color = 
             <ReferenceArea y1={q.p10} y2={q.p25} fill={color} fillOpacity={0.06} stroke="none" ifOverflow="extendDomain" />
             <ReferenceArea y1={q.p25} y2={q.p75} fill={color} fillOpacity={0.16} stroke="none" ifOverflow="extendDomain" />
             <ReferenceArea y1={q.p75} y2={q.p90} fill={color} fillOpacity={0.06} stroke="none" ifOverflow="extendDomain" />
-            <ReferenceLine y={q.p50} stroke={color} strokeOpacity={0.35} strokeDasharray="3 3" />
           </>
         )}
         <XAxis dataKey="date" tick={AXIS} minTickGap={28} axisLine={AXIS} tickLine={false} />
@@ -127,6 +139,17 @@ export default function TrendChart({ series, events = [], height = 240, color = 
           stroke="#52525b"
           strokeWidth={1}
           dot={false}
+          isAnimationActive={false}
+        />
+        <Line
+          type="monotone"
+          dataKey="baseline"
+          stroke={color}
+          strokeWidth={2}
+          strokeOpacity={0.5}
+          strokeDasharray="5 4"
+          dot={false}
+          connectNulls
           isAnimationActive={false}
         />
         <Line
