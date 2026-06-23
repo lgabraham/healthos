@@ -1,5 +1,7 @@
 import { api } from "../api.js";
 import { useHealthData } from "../hooks/useHealthData.js";
+import { useStepGoal } from "../hooks/useStepGoal.js";
+import StepGoalToggle from "../components/StepGoalToggle.jsx";
 import { Badge } from "@/components/ui/badge";
 import { hm, num } from "../format.js";
 
@@ -24,9 +26,8 @@ function fmtTime(iso) {
   }
 }
 
-const STEP_GOAL = 10000;
-
 export default function WorkoutsView() {
+  const [goal, setGoal] = useStepGoal();
   const { data: workouts, loading, error } = useHealthData(() => api.workouts(90), []);
   const { data: calendar } = useHealthData(() => api.calendar(90), []);
   const { data: steps } = useHealthData(() => api.trend("steps", 90), []);
@@ -63,21 +64,44 @@ export default function WorkoutsView() {
       source: "calendar",
     }));
 
-  // 10k+ step days that don't already have a recorded workout — so an active
+  // Goal+ step days that don't already have a recorded workout — so an active
   // walking day still shows up in the log instead of being blank.
   const workoutDates = new Set(recorded.map((r) => r.date));
   const walked = (steps?.series || [])
-    .filter((d) => d.value != null && d.value >= STEP_GOAL && !workoutDates.has(d.date))
+    .filter((d) => d.value != null && d.value >= goal && !workoutDates.has(d.date))
     .map((d) => ({ kind: "steps", date: d.date, time: null, label: "Walk", source: "steps", steps: d.value }));
 
   const all = [...recorded, ...planned, ...walked].sort(
     (a, b) => b.date.localeCompare(a.date) || (b.time || "").localeCompare(a.time || ""),
   );
 
+  // Active days over the window: any day with a recorded workout OR goal+ steps.
+  const activeDates = new Set([...workoutDates, ...walked.map((w) => w.date)]);
+  const activeCount = activeDates.size;
+
   return (
     <>
+      <div
+        className="panel"
+        style={{
+          marginBottom: "0.8rem",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: "0.8rem",
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div className="metric-value" style={{ fontSize: "1.4rem" }}>
+            {activeCount} <span className="unit">active / 90 days</span>
+          </div>
+          <div className="metric-sub">workout or {goal.toLocaleString()}+ steps</div>
+        </div>
+        <StepGoalToggle value={goal} onChange={setGoal} />
+      </div>
       <div className="statusline" style={{ marginBottom: "0.8rem" }}>
-        workouts (Garmin/Whoop) + calendar exercise + 10k+ step days · last 90 days
+        workouts (Garmin/Whoop) + calendar exercise + {goal / 1000}k+ step days · last 90 days
       </div>
       {all.length === 0 && (
         <div className="panel">

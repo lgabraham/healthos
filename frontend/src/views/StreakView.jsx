@@ -1,10 +1,11 @@
 import { api } from "../api.js";
 import { useHealthData } from "../hooks/useHealthData.js";
+import { useStepGoal } from "../hooks/useStepGoal.js";
+import StepGoalToggle from "../components/StepGoalToggle.jsx";
 import { Badge } from "@/components/ui/badge";
 
 // A day "counts" if you worked out OR hit the step goal. One rest day is fine;
 // two rest days in a row breaks the streak.
-const STEP_GOAL = 10000;
 const MILESTONES = [5, 10, 20];
 
 const MARK_COLOR = {
@@ -20,12 +21,12 @@ function todayISO() {
   return new Date().toLocaleDateString("en-CA");
 }
 
-function buildDays(stepsSeries, workouts) {
+function buildDays(stepsSeries, workouts, goal) {
   const workoutDays = new Set((workouts || []).map((w) => w.date));
   return (stepsSeries || []).map((d) => {
     const worked = workoutDays.has(d.date);
-    const hit10k = d.value != null && d.value >= STEP_GOAL;
-    return { date: d.date, steps: d.value, worked, hit10k, active: worked || hit10k };
+    const hitGoal = d.value != null && d.value >= goal;
+    return { date: d.date, steps: d.value, worked, hitGoal, active: worked || hitGoal };
   });
 }
 
@@ -103,13 +104,14 @@ function MilestoneStrip({ streak }) {
 }
 
 export default function StreakView() {
+  const [goal, setGoal] = useStepGoal();
   const { data: steps, loading, error } = useHealthData(() => api.trend("steps", 90), []);
   const { data: workouts } = useHealthData(() => api.workouts(90), []);
 
   if (loading) return <div className="muted mono">loading…</div>;
   if (error) return <div className="error">error: {error}</div>;
 
-  const days = buildDays(steps?.series, workouts);
+  const days = buildDays(steps?.series, workouts, goal);
   const { streak, longest } = computeStreak(days);
   const weeks = toWeeks(days);
   const last7 = days.slice(-7);
@@ -119,9 +121,15 @@ export default function StreakView() {
 
   return (
     <>
-      <div className="statusline" style={{ marginBottom: "0.8rem" }}>
-        a day counts if you worked out or hit {STEP_GOAL.toLocaleString()} steps · one weekday rest
-        is fine, two in a row breaks it · weekends are free
+      <div
+        className="statusline"
+        style={{ marginBottom: "0.8rem", display: "flex", alignItems: "center", gap: "0.7rem", flexWrap: "wrap" }}
+      >
+        <span>
+          a day counts if you worked out or hit {goal.toLocaleString()} steps · one weekday rest is
+          fine, two in a row breaks it · weekends are free
+        </span>
+        <StepGoalToggle value={goal} onChange={setGoal} />
       </div>
 
       <div className="grid cols-3" style={{ marginBottom: "0.85rem" }}>
@@ -185,7 +193,7 @@ export default function StreakView() {
         </div>
         <div className="legend" style={{ marginTop: "0.8rem" }}>
           <span><i style={{ background: MARK_COLOR.workout }} />workout</span>
-          <span><i style={{ background: MARK_COLOR.steps }} />10k+ steps</span>
+          <span><i style={{ background: MARK_COLOR.steps }} />{goal / 1000}k+ steps</span>
           <span><i style={{ background: MARK_COLOR.rest, border: "1px solid #3f3f46" }} />rest (ok)</span>
           <span><i style={{ background: MARK_COLOR.broken }} />broke streak</span>
         </div>
