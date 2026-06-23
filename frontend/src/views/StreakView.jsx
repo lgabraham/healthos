@@ -10,8 +10,9 @@ const MILESTONES = [5, 10, 20];
 const MARK_COLOR = {
   workout: "#4ade80", // trained (green)
   steps: "#f59e0b", // moved, 10k+ (orange)
-  rest: "#2f2f33", // single rest — streak held
-  broken: "#5b1a1a", // 2nd rest in a row — streak broke
+  rest: "#2f2f33", // single weekday rest — streak held
+  weekend: "#2a2d36", // weekend rest — free, never breaks
+  broken: "#5b1a1a", // 2nd weekday rest in a row — streak broke
   pending: "#1a1a1a", // today, not yet active
 };
 
@@ -34,6 +35,8 @@ function computeStreak(days) {
   let longest = 0;
   let prevRest = false;
   for (const d of days) {
+    const dow = new Date(`${d.date}T00:00:00`).getDay();
+    const weekend = dow === 0 || dow === 6;
     if (d.date === today && !d.active) {
       d.mark = "pending";
       continue;
@@ -42,6 +45,10 @@ function computeStreak(days) {
       streak += 1;
       prevRest = false;
       d.mark = d.worked ? "workout" : "steps";
+    } else if (weekend) {
+      // Weekends are free: never break, and don't use up your weekday rest.
+      streak += 1;
+      d.mark = "weekend";
     } else if (prevRest) {
       streak = 0;
       d.mark = "broken";
@@ -60,6 +67,7 @@ function markLabel(d) {
   if (d.mark === "steps") return `${Math.round(d.steps).toLocaleString()} steps`;
   if (d.mark === "broken") return "rest (streak broke)";
   if (d.mark === "pending") return "today — not active yet";
+  if (d.mark === "weekend") return "weekend (free)";
   return d.steps != null ? `rest · ${Math.round(d.steps).toLocaleString()} steps` : "rest";
 }
 
@@ -112,8 +120,8 @@ export default function StreakView() {
   return (
     <>
       <div className="statusline" style={{ marginBottom: "0.8rem" }}>
-        a day counts if you worked out or hit {STEP_GOAL.toLocaleString()} steps · one rest is fine,
-        two in a row breaks it
+        a day counts if you worked out or hit {STEP_GOAL.toLocaleString()} steps · one weekday rest
+        is fine, two in a row breaks it · weekends are free
       </div>
 
       <div className="grid cols-3" style={{ marginBottom: "0.85rem" }}>
