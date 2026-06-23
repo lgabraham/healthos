@@ -1,5 +1,4 @@
 import {
-  Area,
   Brush,
   CartesianGrid,
   ComposedChart,
@@ -13,9 +12,9 @@ import {
 } from "recharts";
 import { eventColor, eventMeta } from "../format.js";
 
-// Custom-styled Recharts chart: raw daily value (thin), a 7d rolling average
-// with a gradient glow, a slow ~4-week baseline line (long-term trend), a
-// graded "usual range" channel, behavioral events as dots, and a drag Brush.
+// Custom-styled Recharts chart: raw daily value (thin), a 7d rolling average,
+// a slow ~4-week baseline line (long-term trend), a graded "usual range"
+// channel, behavioral events as dots, and a drag Brush.
 const AXIS = { stroke: "#3f3f46", fontSize: 11, fontFamily: "IBM Plex Mono" };
 const BASELINE_WINDOW = 28;
 
@@ -104,17 +103,10 @@ export default function TrendChart({ series, events = [], height = 240, color = 
     p75: percentile(rollVals, 0.75),
     p90: percentile(rollVals, 0.9),
   } : null;
-  const gradId = `trendGlow-${color.replace("#", "")}`;
 
   return (
     <ResponsiveContainer width="100%" height={height}>
       <ComposedChart data={data} margin={{ top: 8, right: 12, bottom: 4, left: -8 }}>
-        <defs>
-          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={color} stopOpacity={0.28} />
-            <stop offset="100%" stopColor={color} stopOpacity={0} />
-          </linearGradient>
-        </defs>
         <CartesianGrid stroke="#1f1f1f" vertical={false} />
         {q && q.p90 > q.p10 && (
           <>
@@ -126,13 +118,6 @@ export default function TrendChart({ series, events = [], height = 240, color = 
         <XAxis dataKey="date" tick={AXIS} minTickGap={28} axisLine={AXIS} tickLine={false} />
         <YAxis tick={AXIS} axisLine={AXIS} tickLine={false} width={48} domain={["auto", "auto"]} tickFormatter={yFormat} />
         <Tooltip content={<DarkTooltip />} />
-        <Area
-          type="monotone"
-          dataKey="rolling"
-          stroke="none"
-          fill={`url(#${gradId})`}
-          isAnimationActive={false}
-        />
         <Line
           type="linear"
           dataKey="value"
