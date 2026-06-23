@@ -75,8 +75,15 @@ export default function WorkoutsView() {
     (a, b) => b.date.localeCompare(a.date) || (b.time || "").localeCompare(a.time || ""),
   );
 
-  // Active days over the window: any day with a recorded workout OR goal+ steps.
-  const activeDates = new Set([...workoutDates, ...walked.map((w) => w.date)]);
+  // Active days = any day with a recorded workout OR goal+ steps. Scoped to a
+  // recent window (older data is sparse/stale, so a /90 count reads low).
+  const SUMMARY_DAYS = 30;
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - (SUMMARY_DAYS - 1));
+  const cutoffISO = cutoff.toLocaleDateString("en-CA");
+  const activeDates = new Set(
+    [...workoutDates, ...walked.map((w) => w.date)].filter((d) => d >= cutoffISO),
+  );
   const activeCount = activeDates.size;
 
   return (
@@ -94,7 +101,7 @@ export default function WorkoutsView() {
       >
         <div>
           <div className="metric-value" style={{ fontSize: "1.4rem" }}>
-            {activeCount} <span className="unit">active / 90 days</span>
+            {activeCount} <span className="unit">active / {SUMMARY_DAYS} days</span>
           </div>
           <div className="metric-sub">workout or {goal.toLocaleString()}+ steps</div>
         </div>
