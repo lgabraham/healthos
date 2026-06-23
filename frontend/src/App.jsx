@@ -9,10 +9,10 @@ import SleepView from "./views/SleepView.jsx";
 
 const VIEWS = {
   daily: { label: "Daily", component: DailyView },
-  trends: { label: "Trends", component: TrendsView },
-  workouts: { label: "Workouts", component: WorkoutsView },
-  streak: { label: "Streak", component: StreakView },
   sleep: { label: "Sleep", component: SleepView },
+  trends: { label: "Trends", component: TrendsView },
+  streak: { label: "Streak", component: StreakView },
+  workouts: { label: "Workouts", component: WorkoutsView },
 };
 
 function StatusLine() {

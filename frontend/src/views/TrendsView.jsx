@@ -3,7 +3,10 @@ import { api } from "../api.js";
 import { useHealthData } from "../hooks/useHealthData.js";
 import TrendChart from "../components/TrendChart.jsx";
 
-const RANGES = [30, 60, 90];
+// 1y (365) also clamps to your earliest data on the backend, so it doubles as
+// "all history" until there's more than a year stored.
+const RANGES = [30, 60, 90, 365];
+const rangeLabel = (d) => (d >= 365 ? "1y" : `${d}d`);
 
 const CHARTS = [
   { metric: "hrv_rmssd", title: "HRV (rmssd) · 7-day rolling", color: "#f59e0b", unit: "ms", goodUp: true },
@@ -46,9 +49,9 @@ function DeltaBadge({ change, unit, goodUp, days }) {
     <span
       className="mono"
       style={{ color, fontSize: "0.72rem", whiteSpace: "nowrap" }}
-      title={`change over the ${days}d window (first half vs second half)`}
+      title={`change over the ${rangeLabel(days)} window (first half vs second half)`}
     >
-      {arrow} {unit === "min" && delta >= 0 ? "+" : ""}{d}{pctStr} · {days}d
+      {arrow} {unit === "min" && delta >= 0 ? "+" : ""}{d}{pctStr} · {rangeLabel(days)}
     </span>
   );
 }
@@ -85,7 +88,7 @@ export default function TrendsView() {
         <div className="toggle">
           {RANGES.map((r) => (
             <button key={r} className={days === r ? "active" : ""} onClick={() => setDays(r)}>
-              {r}d
+              {rangeLabel(r)}
             </button>
           ))}
         </div>
