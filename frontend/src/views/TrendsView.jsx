@@ -18,20 +18,22 @@ const CHARTS = [
   },
 ];
 
-// 4-week change = mean of the last 14 days vs the 14 days before that. The
-// series is padded one-per-day, so slicing by index = slicing by calendar day.
-function fourWeekChange(series) {
-  if (!series || series.length < 16) return null;
-  const recent = series.slice(-14).map((d) => d.value).filter((v) => v != null);
-  const prior = series.slice(-28, -14).map((d) => d.value).filter((v) => v != null);
-  if (recent.length < 3 || prior.length < 3) return null;
+// Change across the *visible* range: mean of the first half vs the second half
+// of the series (so the badge matches the trend you're looking at). Padded
+// one-per-day, so the two halves are equal calendar spans.
+function rangeChange(series) {
+  if (!series || series.length < 8) return null;
+  const mid = Math.floor(series.length / 2);
+  const first = series.slice(0, mid).map((d) => d.value).filter((v) => v != null);
+  const second = series.slice(mid).map((d) => d.value).filter((v) => v != null);
+  if (first.length < 3 || second.length < 3) return null;
   const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
-  const r = mean(recent);
-  const p = mean(prior);
-  return { delta: r - p, pct: p ? ((r - p) / p) * 100 : null };
+  const f = mean(first);
+  const s = mean(second);
+  return { delta: s - f, pct: f ? ((s - f) / f) * 100 : null };
 }
 
-function DeltaBadge({ change, unit, goodUp }) {
+function DeltaBadge({ change, unit, goodUp, days }) {
   if (!change) return null;
   const { delta, pct } = change;
   const flat = Math.abs(pct ?? 0) < 1.5;
@@ -41,20 +43,24 @@ function DeltaBadge({ change, unit, goodUp }) {
   const d = unit === "min" ? `${Math.round(delta)}m` : `${delta >= 0 ? "+" : ""}${delta.toFixed(1)}${unit}`;
   const pctStr = pct == null ? "" : ` (${pct >= 0 ? "+" : ""}${pct.toFixed(0)}%)`;
   return (
-    <span className="mono" style={{ color, fontSize: "0.72rem", whiteSpace: "nowrap" }} title="mean of last 14d vs prior 14d">
-      {arrow} {unit === "min" && delta >= 0 ? "+" : ""}{d}{pctStr} · 4wk
+    <span
+      className="mono"
+      style={{ color, fontSize: "0.72rem", whiteSpace: "nowrap" }}
+      title={`change over the ${days}d window (first half vs second half)`}
+    >
+      {arrow} {unit === "min" && delta >= 0 ? "+" : ""}{d}{pctStr} · {days}d
     </span>
   );
 }
 
 function Chart({ metric, title, color, days, unit, goodUp, yFormat }) {
   const { data, loading, error } = useHealthData(() => api.trend(metric, days, 7), [metric, days]);
-  const change = data ? fourWeekChange(data.series) : null;
+  const change = data ? rangeChange(data.series) : null;
   return (
     <div className="panel">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "0.5rem" }}>
         <div className="label" style={{ marginBottom: 0 }}>{title}</div>
-        <DeltaBadge change={change} unit={unit} goodUp={goodUp} />
+        <DeltaBadge change={change} unit={unit} goodUp={goodUp} days={days} />
       </div>
       {loading && <div className="muted mono">loading…</div>}
       {error && <div className="error">error: {error}</div>}
