@@ -4,17 +4,15 @@ import { useHealthData } from "./hooks/useHealthData.js";
 import DailyView from "./views/DailyView.jsx";
 import TrendsView from "./views/TrendsView.jsx";
 import CorrelationsView from "./views/CorrelationsView.jsx";
-import CoverageView from "./views/CoverageView.jsx";
-import SignalsView from "./views/SignalsView.jsx";
 import WorkoutsView from "./views/WorkoutsView.jsx";
+import StreakView from "./views/StreakView.jsx";
 
 const VIEWS = {
   daily: { label: "Daily", component: DailyView },
   trends: { label: "Trends", component: TrendsView },
   workouts: { label: "Workouts", component: WorkoutsView },
-  signals: { label: "Signals", component: SignalsView },
+  streak: { label: "Streak", component: StreakView },
   correlations: { label: "Correlations", component: CorrelationsView },
-  coverage: { label: "Coverage", component: CoverageView },
 };
 
 function StatusLine() {
