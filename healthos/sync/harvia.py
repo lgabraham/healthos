@@ -155,13 +155,28 @@ class HarviaClient:
 
     def fetch_raw(self) -> dict:
         """Diagnostic: device tree + each device's current state and latest data,
-        so the live ``data`` shape can be captured (`healthos harvia-raw`)."""
-        tree = self.device_tree()
-        ids = device_ids(tree)
+        so the live ``data`` shape can be captured (`healthos harvia-raw`).
+
+        Best-effort: each call is isolated so one failing query (e.g. a deviceId
+        the resolver rejects) still lets the rest — and the all-important raw
+        device tree — print."""
+
+        def _try(fn, *a):
+            try:
+                return fn(*a)
+            except Exception as exc:  # noqa: BLE001 - diagnostic, keep going
+                return {"_error": str(exc)}
+
+        tree = _try(self.device_tree)
+        ids = device_ids(tree) if isinstance(tree, dict) else []
         return {
             "device_tree": tree,
+            "device_ids": ids,
             "devices": {
-                did: {"state": self.device_state(did), "latest": self.latest_data(did)}
+                did: {
+                    "state": _try(self.device_state, did),
+                    "latest": _try(self.latest_data, did),
+                }
                 for did in ids
             },
         }
