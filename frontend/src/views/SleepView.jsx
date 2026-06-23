@@ -1,5 +1,6 @@
 import { api } from "../api.js";
 import { useHealthData } from "../hooks/useHealthData.js";
+import { useRhrOffset, RHR_OFFSETS } from "../hooks/useRhrOffset.js";
 import { Badge } from "@/components/ui/badge";
 
 // A night "counts" toward the sleep streak if you stayed on routine — bedtime
@@ -136,6 +137,7 @@ function MilestoneStrip({ streak }) {
 }
 
 export default function SleepView() {
+  const [rhrOffset, setRhrOffset] = useRhrOffset();
   const { data: sleep, loading, error } = useHealthData(() => api.sleep(90), []);
   const { data: rhr } = useHealthData(() => api.trend("resting_hr", 90, 1), []);
 
@@ -152,10 +154,11 @@ export default function SleepView() {
   const bedSpread = spread(bedtimes, medBed);
   const wakeSpread = spread(waketimes, medWake);
 
-  // Personalized RHR target: your median resting HR over the window. Nights at
-  // or below it "count" even if bedtime drifted.
+  // Personalized RHR target: your median resting HR, shifted by the chosen
+  // difficulty offset. Nights at or below it "count" even if bedtime drifted.
   const rhrVals = (rhr?.series || []).map((d) => d.value).filter((v) => v != null);
-  const rhrTarget = rhrVals.length ? Math.round(median(rhrVals)) : null;
+  const rhrMedian = rhrVals.length ? Math.round(median(rhrVals)) : null;
+  const rhrTarget = rhrMedian == null ? null : rhrMedian + rhrOffset;
 
   const haveSleep = new Set((sleep || []).map((s) => s.date));
   const nights = buildNights(sleep, rhr?.series, rhrTarget, medBed);
@@ -169,9 +172,26 @@ export default function SleepView() {
 
   return (
     <>
-      <div className="statusline" style={{ marginBottom: "0.8rem" }}>
-        a night counts if bedtime is within {BEDTIME_WINDOW}m of your median (
-        {fmtClock(medBed)}){rhrTarget ? ` or resting HR is ≤ ${rhrTarget}bpm` : ""} · last 90 nights
+      <div
+        className="statusline"
+        style={{ marginBottom: "0.8rem", display: "flex", alignItems: "center", gap: "0.7rem", flexWrap: "wrap" }}
+      >
+        <span>
+          a night counts if bedtime is within {BEDTIME_WINDOW}m of your median ({fmtClock(medBed)})
+          {rhrTarget ? " or resting HR is low ·" : " ·"} last 90 nights
+        </span>
+        {rhrMedian != null && (
+          <span style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+            <span className="muted" style={{ fontSize: "0.72rem" }}>low HR ≤</span>
+            <div className="toggle">
+              {RHR_OFFSETS.map((o) => (
+                <button key={o} className={rhrOffset === o ? "active" : ""} onClick={() => setRhrOffset(o)}>
+                  {rhrMedian + o}
+                </button>
+              ))}
+            </div>
+          </span>
+        )}
       </div>
 
       <div className="grid cols-3" style={{ marginBottom: "0.85rem" }}>
