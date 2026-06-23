@@ -31,17 +31,23 @@ function trendUpTo(trend, date, n = 21) {
   return (trend?.series || []).filter((d) => d.date <= date).slice(-n);
 }
 
+// Warn only when your PRIMARY nightly source (the pod) goes silent — and stay
+// quiet when Whoop is covering (e.g. travel). No more nagging about stale
+// Whoop, which is just the fallback now.
 function DataHealthBanner({ status }) {
   const [dismissed, setDismissed] = useState(false);
   if (!status?.sources || dismissed) return null;
+  const es = status.sources.eight_sleep;
   const whoop = status.sources.whoop;
-  if (!whoop || whoop.days_behind <= 2) return null;
+  const podBehind = !es || es.days_behind > 2;
+  const whoopCovering = whoop && whoop.days_behind <= 2;
+  if (!podBehind || whoopCovering) return null;
   return (
     <div className="banner" style={{ display: "flex", justifyContent: "space-between", gap: "1rem" }}>
       <span>
-        WHOOP LAST RECORDED {whoop.last_data_date} ({whoop.days_behind}d behind) — recovery is
-        estimated, strain unavailable. Wear + open the Whoop app, then:{" "}
-        <span className="mono">healthos sync --days 30 --source whoop</span>
+        NO NIGHTLY DATA{es ? ` in ${es.days_behind}d` : ""} — your Eight Sleep pod hasn't reported.
+        Check it's online, then:{" "}
+        <span className="mono">healthos sync --days 7 --source eight_sleep</span>
       </span>
       <button
         onClick={() => setDismissed(true)}
