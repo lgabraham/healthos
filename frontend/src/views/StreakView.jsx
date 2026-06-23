@@ -8,8 +8,8 @@ const STEP_GOAL = 10000;
 const MILESTONES = [5, 10, 20];
 
 const MARK_COLOR = {
-  workout: "#f59e0b", // trained
-  steps: "#4ade80", // moved (10k+)
+  workout: "#4ade80", // trained (green)
+  steps: "#f59e0b", // moved, 10k+ (orange)
   rest: "#2f2f33", // single rest — streak held
   broken: "#5b1a1a", // 2nd rest in a row — streak broke
   pending: "#1a1a1a", // today, not yet active

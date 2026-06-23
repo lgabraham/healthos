@@ -3,7 +3,6 @@ import { api } from "./api.js";
 import { useHealthData } from "./hooks/useHealthData.js";
 import DailyView from "./views/DailyView.jsx";
 import TrendsView from "./views/TrendsView.jsx";
-import CorrelationsView from "./views/CorrelationsView.jsx";
 import WorkoutsView from "./views/WorkoutsView.jsx";
 import StreakView from "./views/StreakView.jsx";
 
@@ -12,7 +11,6 @@ const VIEWS = {
   trends: { label: "Trends", component: TrendsView },
   workouts: { label: "Workouts", component: WorkoutsView },
   streak: { label: "Streak", component: StreakView },
-  correlations: { label: "Correlations", component: CorrelationsView },
 };
 
 function StatusLine() {
