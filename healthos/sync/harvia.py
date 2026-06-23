@@ -17,10 +17,12 @@ as the MyHarvia app. The real flow, verified against that source:
 Important architectural note: MyHarvia exposes only *current* state + the
 *latest* data point, plus a live websocket subscription (``onDataUpdates``) —
 there is **no history query**. So a nightly pull can't reliably catch a sauna
-session; that needs a persistent websocket listener (built separately). This
-module currently provides auth/discovery + the read queries and a ``fetch_raw``
-diagnostic (``healthos harvia-raw``) so the live ``data`` shape can be captured
-before the listener's session-detection is finalized.
+session; capture has to be live. Rather than hold an AppSync websocket open, the
+``harvia_monitor`` module polls ``getDeviceState`` (~every 60s) on the always-on
+host and records a confirmed sauna event when the stove turns off — far less code
+and equally reliable for 20–60 min sessions. This module provides auth/discovery,
+the read queries, the ``reported``-shadow parsing + device identification the
+monitor relies on, and a ``fetch_raw`` diagnostic (``healthos harvia-raw``).
 
 Unset ``HARVIA_EMAIL`` / ``HARVIA_PASSWORD`` and the source is a clean no-op.
 """
@@ -204,20 +206,71 @@ def device_ids(tree: dict) -> list[str]:
     return list(dict.fromkeys(found))
 
 
+def reported_state(state: dict) -> dict:
+    """Parse ``getDeviceState.reported`` (a JSON *string*) into a dict.
+
+    Returns ``{}`` for anything unexpected (missing node, unparseable string),
+    so callers can treat "no usable state" uniformly.
+    """
+    import json
+
+    inner = state.get("getDeviceState") if isinstance(state, dict) else None
+    if not isinstance(inner, dict):
+        return {}
+    reported = inner.get("reported")
+    if isinstance(reported, str):
+        try:
+            reported = json.loads(reported)
+        except json.JSONDecodeError:
+            return {}
+    return reported if isinstance(reported, dict) else {}
+
+
+def is_active(state: dict) -> bool | None:
+    """Whether the stove is on, from a ``getDeviceState`` payload.
+
+    ``None`` when the shadow carries no ``active`` field (an empty/unprovisioned
+    device), so the monitor can tell "off" apart from "not a real stove".
+    """
+    reported = reported_state(state)
+    if "active" not in reported:
+        return None
+    return bool(reported["active"])
+
+
+def identify_sauna_device(client: HarviaClient) -> str | None:
+    """Pick the real sauna stove out of the account's device tree.
+
+    The tree also contains a GROUP node (querying its state raises "Unauthorized")
+    and can contain empty/unprovisioned devices (their reported shadow is a bare
+    ``deviceId`` with no ``active`` flag). A real stove is the one whose state
+    query succeeds *and* whose reported shadow exposes ``active`` — so we keep
+    only that and skip the rest.
+    """
+    tree = client.device_tree()
+    for did in device_ids(tree):
+        try:
+            state = client.device_state(did)
+        except Exception:  # noqa: BLE001 - group node -> "Unauthorized"; skip it
+            continue
+        if is_active(state) is not None:
+            return did
+    return None
+
+
 def pull(start_date: _date, end_date: _date, client: HarviaClient | None = None) -> dict:
     """Sync entry point. No-op when unconfigured.
 
-    MyHarvia has no history API, so confirmed sauna sessions are captured by the
-    persistent websocket listener, not this nightly pull — this stays a no-op
-    (returning no events) until that listener lands, so the nightly run neither
-    errors nor writes guesses.
+    MyHarvia has no history API, so confirmed sauna sessions are captured live by
+    the ``harvia_monitor`` poll loop, not this nightly pull — this stays a no-op
+    (returning no events) so the nightly run neither errors nor writes guesses.
     """
     if not (settings.harvia_email and settings.harvia_password):
         return {}
     return {"events": []}
 
 
-# --- session helpers (used by the forthcoming listener) -------------------
+# --- session helpers (used by the monitor) --------------------------------
 # How long a stretch of "heater on" samples can gap before it's a new session.
 _SESSION_GAP_S = 30 * 60
 _MIN_SESSION_MIN = 5
@@ -240,8 +293,9 @@ def sessions_from_samples(
     """Collapse (timestamp, heater_on) samples into (start, end) epoch sessions,
     splitting whenever the gap between on-samples exceeds ``_SESSION_GAP_S``.
 
-    Kept here for the websocket listener: as ``onDataUpdates`` pushes samples,
-    it can reuse this to decide when a heating session has ended.
+    The poll monitor tracks the active 1→0 edge directly, but this stays as the
+    reducer for reconstructing sessions from a batch of samples (e.g. backfilling
+    from a captured ``onDataUpdates`` stream).
     """
     on = sorted(ts for ts, is_on in samples if is_on)
     sessions: list[tuple[float, float]] = []

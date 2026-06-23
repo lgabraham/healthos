@@ -17,6 +17,9 @@ build/
 .garth/
 tokenstore/
 
+# Harvia monitor in-progress session state
+.harvia_monitor_state.json
+
 # Frontend
 frontend/node_modules/
 frontend/dist/
