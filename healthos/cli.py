@@ -165,6 +165,21 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
     print("\n  ✓ connected   ✗ configured but failing   ○ not set up yet")
 
 
+def _cmd_harvia_raw(_args: argparse.Namespace) -> None:
+    """Dump MyHarvia devices and their raw data payloads, so the device-history
+    query and normalizer can be finalized against a live account."""
+    import json
+
+    from .sync.harvia import HarviaClient
+
+    client = HarviaClient()
+    try:
+        client.login()
+        print(json.dumps(client.fetch_raw(), indent=2, default=str))
+    finally:
+        client.close()
+
+
 def _cmd_es_raw(_args: argparse.Namespace) -> None:
     """Map every Eight Sleep device + user and report each one's newest data."""
     from .sync.eight_sleep import EightSleepClient
@@ -303,6 +318,9 @@ def build_parser() -> argparse.ArgumentParser:
     wr = sub.add_parser("whoop-raw", help="dump one page of each Whoop v2 endpoint")
     wr.add_argument("--days", type=int, default=7)
     wr.set_defaults(func=_cmd_whoop_raw)
+
+    hr = sub.add_parser("harvia-raw", help="dump MyHarvia devices + raw data JSON")
+    hr.set_defaults(func=_cmd_harvia_raw)
 
     su = sub.add_parser("summary")
     su.add_argument("--date", default=None)

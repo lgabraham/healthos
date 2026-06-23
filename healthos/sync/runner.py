@@ -13,10 +13,11 @@ from datetime import date as _date
 
 from ..config import settings
 from ..database import get_session
-from . import calendar, eight_sleep, garmin, whoop
+from . import calendar, eight_sleep, garmin, harvia, whoop
 from .persistence import (
     SyncResult,
     upsert_calendar_events,
+    upsert_events,
     upsert_metrics,
     upsert_sleep,
     upsert_workouts,
@@ -31,6 +32,7 @@ SOURCES: dict[str, tuple[Callable[[_date, _date], dict], str]] = {
     "garmin": (garmin.pull, garmin.SOURCE),
     "eight_sleep": (eight_sleep.pull, eight_sleep.SOURCE),
     "calendar": (calendar.pull, calendar.SOURCE),
+    "harvia": (harvia.pull, harvia.SOURCE),
 }
 
 
@@ -58,6 +60,7 @@ def sync_source(
             written += upsert_sleep(session, data.get("sleeps", []))
             written += upsert_workouts(session, data.get("workouts", []))
             written += upsert_calendar_events(session, data.get("calendar_events", []))
+            written += upsert_events(session, data.get("events", []))
             result.records_written = written
             write_sync_log(session, result)
         log.info("Synced %s %s..%s: %d records%s", source, start, end,
@@ -75,9 +78,12 @@ def _delete_source_window(session, source: str, start: _date, end: _date) -> Non
     re-pull becomes an exact mirror of the provider, deletions included."""
     from sqlalchemy import delete
 
-    from ..models import DailyMetric, SleepSession, Workout
+    from ..models import DailyEvent, DailyMetric, SleepSession, Workout
 
-    for model in (DailyMetric, SleepSession, Workout):
+    # DailyEvent included so a Harvia re-pull mirrors deletions. Inference rows
+    # use source "inferred_*" and manual rows use "manual", so they're untouched
+    # by a device source's window delete.
+    for model in (DailyMetric, SleepSession, Workout, DailyEvent):
         session.execute(
             delete(model).where(
                 model.source == source, model.date >= start, model.date <= end

@@ -56,6 +56,22 @@ class Settings(BaseSettings):
         default=None, alias="EIGHT_SLEEP_CLIENT_SECRET"
     )
 
+    # Harvia sauna (MyHarvia cloud) ----------------------------------------
+    # The MyHarvia app authenticates against AWS Cognito and talks to an AWS
+    # AppSync GraphQL backend. Credentials are your MyHarvia login; the Cognito
+    # client id / region / endpoint default to the app's public values but are
+    # overridable in case Harvia rotates them or your account is in another
+    # region. Leave email/password unset to disable the source (clean no-op).
+    harvia_email: str | None = Field(default=None, alias="HARVIA_EMAIL")
+    harvia_password: str | None = Field(default=None, alias="HARVIA_PASSWORD")
+    harvia_region: str = Field(default="eu-west-1", alias="HARVIA_REGION")
+    harvia_cognito_client_id: str | None = Field(
+        default=None, alias="HARVIA_COGNITO_CLIENT_ID"
+    )
+    harvia_endpoint_base: str = Field(
+        default="https://prod.myharvia-cloud.net", alias="HARVIA_ENDPOINT_BASE"
+    )
+
     # App ------------------------------------------------------------------
     timezone: str = Field(default="America/Los_Angeles", alias="TIMEZONE")
     sync_hour: int = Field(default=6, alias="SYNC_HOUR")

@@ -17,7 +17,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from ..canonical import is_canonical_metric, is_canonical_sleep
-from ..models import DailyMetric, SleepSession, SyncLog, Workout
+from ..models import DailyEvent, DailyMetric, SleepSession, SyncLog, Workout
 
 
 @dataclass
@@ -77,6 +77,19 @@ class CalendarEventRecord:
     is_evening: bool = False
     keywords: list[str] | None = None
     source: str = "ics"
+
+
+@dataclass
+class EventRecord:
+    """A behavioral/day event from a device source (e.g. a confirmed sauna
+    session from Harvia), destined for ``daily_events``."""
+
+    date: _date
+    event_type: str
+    value: float | None = None  # e.g. sauna minutes
+    confidence: str = "confirmed"
+    notes: str | None = None
+    source: str = "device"
 
 
 @dataclass
@@ -255,6 +268,44 @@ def upsert_calendar_events(session: Session, records: list[CalendarEventRecord])
             )
         )
         session.execute(stmt)
+        written += 1
+    return written
+
+
+def upsert_events(session: Session, records: list[EventRecord]) -> int:
+    """Insert/update day events, keyed on (date, event_type).
+
+    A device-confirmed event (Harvia sauna) is authoritative: it upgrades an
+    earlier inferred guess to 'confirmed'. We do not clobber a row the user
+    confirmed *manually* with their own notes — that stays as their record of
+    truth — but we still refresh the value if the device reports one.
+    """
+    written = 0
+    for r in records:
+        existing = session.scalars(
+            select(DailyEvent).where(
+                DailyEvent.date == r.date, DailyEvent.event_type == r.event_type
+            )
+        ).first()
+        if existing is None:
+            session.add(
+                DailyEvent(
+                    date=r.date,
+                    event_type=r.event_type,
+                    value=r.value,
+                    confidence=r.confidence,
+                    notes=r.notes,
+                    source=r.source,
+                )
+            )
+        elif existing.source == "manual":
+            if r.value is not None:
+                existing.value = r.value  # keep their notes, refresh duration
+        else:
+            existing.value = r.value
+            existing.confidence = r.confidence
+            existing.notes = r.notes
+            existing.source = r.source
         written += 1
     return written
 

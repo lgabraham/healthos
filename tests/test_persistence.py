@@ -6,8 +6,8 @@ from datetime import date
 
 from sqlalchemy import select
 
-from healthos.models import DailyMetric
-from healthos.sync.persistence import MetricPoint, upsert_metrics
+from healthos.models import DailyEvent, DailyMetric
+from healthos.sync.persistence import EventRecord, MetricPoint, upsert_events, upsert_metrics
 
 
 def test_canonical_flag_applied(session):
@@ -24,6 +24,36 @@ def test_canonical_flag_applied(session):
     by_source = {r.source: r.is_canonical for r in rows}
     assert by_source["eight_sleep"] is True  # the pod is canonical for HRV now
     assert by_source["whoop"] is False  # Whoop is the away-from-pod fallback
+
+
+def test_upsert_events_confirms_inferred_but_not_manual(session):
+    day = date(2026, 6, 1)
+    # An inferred sauna guess and a manually-logged one on another day.
+    session.add_all([
+        DailyEvent(date=day, event_type="sauna", confidence="inferred", source="inferred_eight_sleep"),
+        DailyEvent(date=date(2026, 6, 2), event_type="sauna", confidence="manual",
+                   source="manual", notes="my note"),
+    ])
+    session.commit()
+
+    upsert_events(session, [
+        EventRecord(date=day, event_type="sauna", value=22, source="harvia"),
+        EventRecord(date=date(2026, 6, 2), event_type="sauna", value=18, source="harvia"),
+        EventRecord(date=date(2026, 6, 3), event_type="sauna", value=30, source="harvia"),
+    ])
+    session.commit()
+
+    rows = {r.date: r for r in session.scalars(select(DailyEvent)).all()}
+    # Inferred -> upgraded to a confirmed Harvia event.
+    assert rows[day].confidence == "confirmed"
+    assert rows[day].source == "harvia"
+    assert float(rows[day].value) == 22
+    # Manual stays the user's record of truth, but the duration refreshes.
+    assert rows[date(2026, 6, 2)].source == "manual"
+    assert rows[date(2026, 6, 2)].notes == "my note"
+    assert float(rows[date(2026, 6, 2)].value) == 18
+    # Brand-new day inserted.
+    assert rows[date(2026, 6, 3)].confidence == "confirmed"
 
 
 def test_upsert_is_idempotent(session):

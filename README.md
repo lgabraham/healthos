@@ -144,6 +144,31 @@ shows a "building baseline" banner during this period. Replay historical
 inference without re-syncing via `POST /api/admin/reinfer?start=…&end=…` or
 `healthos infer --start … --end …`.
 
+### Harvia sauna (optional, confirmed events)
+
+If your sauna is a MyHarvia-connected Harvia, set `HARVIA_EMAIL` /
+`HARVIA_PASSWORD` and the sync pulls real heater activity, turning each heating
+session into a **confirmed** `sauna` day-event (`source='harvia'`) — the device
+signal that upgrades the low-confidence Eight Sleep thermal inference. Unset,
+the source is a clean no-op.
+
+MyHarvia is an AWS Amplify backend: auth is Cognito (`USER_PASSWORD_AUTH`),
+device history is AppSync GraphQL at `{HARVIA_ENDPOINT_BASE}/{service}/graphql`.
+Defaults target the app's public values; override per account if needed:
+
+- `HARVIA_REGION` (default `eu-west-1`)
+- `HARVIA_COGNITO_CLIENT_ID` — discovered from the `users` service when unset;
+  pin it (captured from the app's traffic) if discovery fails or the pool
+  requires SRP instead of `USER_PASSWORD_AUTH`.
+- `HARVIA_ENDPOINT_BASE` (default `https://prod.myharvia-cloud.net`)
+
+The device-history GraphQL shape varies by firmware, so the normalizer is
+permissive. Dump the live payload to finalize it against your account:
+
+```bash
+healthos harvia-raw   # prints devices + raw data JSON
+```
+
 ## Curating events
 
 Inference produces low-confidence guesses; you curate them via `/api/events`:
