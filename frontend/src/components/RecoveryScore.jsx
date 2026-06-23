@@ -19,7 +19,7 @@ export default function RecoveryScore({ metric }) {
       </div>
       <div className="metric-sub">
         {metric?.is_estimated ? (
-          <span style={{ color: "var(--accent)" }}>estimated from HRV + RHR</span>
+          <span style={{ color: "var(--accent)" }}>estimated from HRV + RHR + sleep</span>
         ) : (
           <>
             {metric?.baseline != null ? `30d avg ${num(metric.baseline)}%` : "no baseline yet"}

@@ -18,14 +18,18 @@ ALL_SOURCES = (WHOOP, GARMIN, EIGHT_SLEEP)
 # Per-metric canonical source. Keys are the normalized ``metric`` strings used
 # in daily_metrics; values are the winning source.
 CANONICAL_METRIC_SOURCE: dict[str, str] = {
-    # Whoop owns recovery/cardiac/sleep-architecture signals.
-    "hrv_rmssd": WHOOP,
-    "resting_hr": WHOOP,
-    "sleep_duration_minutes": WHOOP,
-    "rem_sleep_minutes": WHOOP,
-    "deep_sleep_minutes": WHOOP,
-    "light_sleep_minutes": WHOOP,
-    "awake_minutes": WHOOP,
+    # Canonical = your PRIMARY device for each signal (what you actually wear),
+    # not the theoretically-best instrument. You sleep on the Eight Sleep
+    # nightly, so it owns the nightly cardiac/sleep signals; Whoop is the
+    # labeled fallback for nights away from the pod (e.g. travel).
+    "hrv_rmssd": EIGHT_SLEEP,
+    "resting_hr": EIGHT_SLEEP,
+    "sleep_duration_minutes": EIGHT_SLEEP,
+    "rem_sleep_minutes": EIGHT_SLEEP,
+    "deep_sleep_minutes": EIGHT_SLEEP,
+    "light_sleep_minutes": EIGHT_SLEEP,
+    "awake_minutes": EIGHT_SLEEP,
+    # Whoop-only proprietary signals (no other source produces them).
     "recovery_score": WHOOP,
     "strain_score": WHOOP,
     "spo2": WHOOP,
@@ -49,13 +53,13 @@ CANONICAL_METRIC_SOURCE: dict[str, str] = {
 }
 
 # Which source is canonical for whole sleep *sessions* (architecture/staging).
-CANONICAL_SLEEP_SESSION_SOURCE = WHOOP
+# The pod is the nightly device; Whoop covers away-from-pod nights as fallback.
+CANONICAL_SLEEP_SESSION_SOURCE = EIGHT_SLEEP
 
-# When several NON-canonical sources report the same metric on the same day,
-# pick the fallback deterministically so a re-sync never flips the displayed
-# value. Order reflects sensor suitability for the metrics that actually
-# overlap (HRV/RHR/sleep): the dedicated all-night pod beats the wrist beats
-# the phone. (The canonical source is chosen first, before this ever applies.)
+# When several NON-canonical sources report the same metric on a day, pick the
+# fallback deterministically so a re-sync never flips the displayed value. For
+# the pod-canonical signals (HRV/RHR/sleep), this means an away-from-pod night
+# falls back to Whoop before Garmin. (Canonical is chosen first, before this.)
 FALLBACK_PRIORITY = (WHOOP, EIGHT_SLEEP, GARMIN, APPLE_HEALTH)
 
 

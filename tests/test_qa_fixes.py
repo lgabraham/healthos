@@ -157,20 +157,20 @@ def test_metric_sources_matrix(session, client):
     session.commit()
     body = client.get("/api/metric-sources?days=30").json()
     hrv = next(m for m in body["metrics"] if m["metric"] == "hrv_rmssd")
-    assert hrv["canonical_source"] == "whoop"
+    assert hrv["canonical_source"] == "eight_sleep"
     assert hrv["total_days"] == 5
     by_src = {s["source"]: s for s in hrv["sources"]}
-    assert by_src["whoop"]["days"] == 5 and by_src["whoop"]["canonical"] is True
-    assert by_src["eight_sleep"]["days"] == 5
+    assert by_src["eight_sleep"]["days"] == 5 and by_src["eight_sleep"]["canonical"] is True
+    assert by_src["whoop"]["days"] == 5 and by_src["whoop"]["canonical"] is False
     assert by_src["garmin"]["days"] == 2  # the zero is excluded
-    assert hrv["sources"][0]["source"] == "whoop"  # canonical first
+    assert hrv["sources"][0]["source"] == "eight_sleep"  # canonical first
     # Resolution logic surfaced for the build phase.
     res = hrv["resolution"]
-    assert res["canonical"] == "whoop"
+    assert res["canonical"] == "eight_sleep"
     assert res["zero_is_missing"] is True
-    assert res["fallback_order"] == ["eight_sleep", "garmin"]  # priority order
-    # Whoop has the latest day -> it wins; not a fallback.
-    assert res["current_winner"] == "whoop"
+    assert res["fallback_order"] == ["whoop", "garmin"]  # away-from-pod priority
+    # Eight Sleep is canonical and present on the latest day -> it wins.
+    assert res["current_winner"] == "eight_sleep"
     assert res["current_winner_is_fallback"] is False
 
 
@@ -237,3 +237,48 @@ def test_sync_trigger_and_status(session, client, monkeypatch):
         time.sleep(0.1)
     assert st["running"] is False
     assert st["error"] is None
+
+
+def test_canonical_flip_to_eight_sleep():
+    """Nightly cardiac/sleep signals are canonical to the pod (worn nightly);
+    Whoop-proprietary scores stay Whoop."""
+    from healthos.canonical import is_canonical_metric, is_canonical_sleep
+
+    for m in ("hrv_rmssd", "resting_hr", "sleep_duration_minutes"):
+        assert is_canonical_metric(m, "eight_sleep") is True
+        assert is_canonical_metric(m, "whoop") is False
+    assert is_canonical_sleep("eight_sleep") is True
+    # Whoop keeps the scores only it produces.
+    assert is_canonical_metric("recovery_score", "whoop") is True
+    assert is_canonical_metric("strain_score", "whoop") is True
+
+
+def test_estimated_recovery_rewards_sleep(session):
+    """A night with more sleep than baseline scores higher than the same
+    HRV/RHR night with baseline sleep — sleep now counts."""
+    from datetime import date as _date
+
+    from healthos.models import DailyMetric
+    from healthos.queries import estimated_recovery
+
+    day = _date(2026, 6, 10)
+    # 20 baseline days: HRV 45, RHR 50, sleep 450 min.
+    for i in range(1, 21):
+        d = day - timedelta(days=i)
+        session.add(DailyMetric(date=d, metric="hrv_rmssd", value=45, unit="ms",
+                                source="eight_sleep", is_canonical=True))
+        session.add(DailyMetric(date=d, metric="resting_hr", value=50, unit="bpm",
+                                source="eight_sleep", is_canonical=True))
+        session.add(DailyMetric(date=d, metric="sleep_duration_minutes", value=450,
+                                unit="minutes", source="eight_sleep", is_canonical=True))
+    # Today: HRV/RHR exactly at baseline, but a long sleep (540 vs 450).
+    session.add(DailyMetric(date=day, metric="hrv_rmssd", value=45, unit="ms",
+                            source="eight_sleep", is_canonical=True))
+    session.add(DailyMetric(date=day, metric="resting_hr", value=50, unit="bpm",
+                            source="eight_sleep", is_canonical=True))
+    session.add(DailyMetric(date=day, metric="sleep_duration_minutes", value=540,
+                            unit="minutes", source="eight_sleep", is_canonical=True))
+    session.commit()
+    score = estimated_recovery(session, day)
+    # HRV & RHR at baseline -> ~55; long sleep pushes it up.
+    assert score > 60

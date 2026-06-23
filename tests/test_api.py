@@ -28,7 +28,7 @@ def test_daily_summary_and_trend(session, client):
     points = []
     for i in range(40):
         d = base + timedelta(days=i)
-        points.append(MetricPoint(d, "hrv_rmssd", 55.0 + i % 5, "ms", "whoop"))
+        points.append(MetricPoint(d, "hrv_rmssd", 55.0 + i % 5, "ms", "eight_sleep"))
     upsert_metrics(session, points)
     session.commit()
 
@@ -105,14 +105,14 @@ def test_estimated_recovery_and_all_source_trend(session, client):
 
     base = date(2026, 3, 1)
     pts = []
-    for i in range(30):  # build HRV/RHR baselines (whoop, canonical)
+    for i in range(30):  # build HRV/RHR baselines (eight_sleep, canonical)
         d = base + timedelta(days=i)
-        pts += [MetricPoint(d, "hrv_rmssd", 60.0, "ms", "whoop"),
-                MetricPoint(d, "resting_hr", 50.0, "bpm", "whoop")]
-    # A later day with only Eight Sleep HRV/RHR (non-canonical), no recovery.
+        pts += [MetricPoint(d, "hrv_rmssd", 60.0, "ms", "eight_sleep"),
+                MetricPoint(d, "resting_hr", 50.0, "bpm", "eight_sleep")]
+    # A later day with only Whoop HRV/RHR (away-from-pod fallback), no recovery.
     target = base + timedelta(days=30)
-    pts += [MetricPoint(target, "hrv_rmssd", 72.0, "ms", "eight_sleep"),
-            MetricPoint(target, "resting_hr", 46.0, "bpm", "eight_sleep")]
+    pts += [MetricPoint(target, "hrv_rmssd", 72.0, "ms", "whoop"),
+            MetricPoint(target, "resting_hr", 46.0, "bpm", "whoop")]
     upsert_metrics(session, pts)
     session.commit()
 
@@ -155,11 +155,11 @@ def test_attribution_and_aligned_trend(session, client):
     pts = []
     for i in range(30):
         d = base + timedelta(days=i)
-        pts += [MetricPoint(d, "hrv_rmssd", 60.0, "ms", "whoop"),
-                MetricPoint(d, "resting_hr", 50.0, "bpm", "whoop")]
+        pts += [MetricPoint(d, "hrv_rmssd", 60.0, "ms", "eight_sleep"),
+                MetricPoint(d, "resting_hr", 50.0, "bpm", "eight_sleep")]
     target = base + timedelta(days=30)
-    pts += [MetricPoint(target, "hrv_rmssd", 45.0, "ms", "whoop"),   # -25% drag
-            MetricPoint(target, "resting_hr", 50.0, "bpm", "whoop")]  # neutral
+    pts += [MetricPoint(target, "hrv_rmssd", 45.0, "ms", "eight_sleep"),   # -25% drag
+            MetricPoint(target, "resting_hr", 50.0, "bpm", "eight_sleep")]  # neutral
     upsert_metrics(session, pts)
     session.commit()
 

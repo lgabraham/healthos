@@ -16,8 +16,8 @@ def _seed_baseline(session, start: date, n: int, hrv: float, rhr: float, recover
     for i in range(n):
         d = start + timedelta(days=i)
         points += [
-            MetricPoint(d, "hrv_rmssd", hrv, "ms", "whoop"),
-            MetricPoint(d, "resting_hr", rhr, "bpm", "whoop"),
+            MetricPoint(d, "hrv_rmssd", hrv, "ms", "eight_sleep"),
+            MetricPoint(d, "resting_hr", rhr, "bpm", "eight_sleep"),
             MetricPoint(d, "recovery_score", recovery, "score", "whoop"),
         ]
     upsert_metrics(session, points)
@@ -41,10 +41,10 @@ def test_sick_detection(session):
     upsert_metrics(
         session,
         [
-            MetricPoint(d1, "hrv_rmssd", 38.0, "ms", "whoop"),  # < 0.7 * 60 = 42
-            MetricPoint(d1, "resting_hr", 60.0, "bpm", "whoop"),  # > 1.15 * 50 = 57.5
-            MetricPoint(d2, "hrv_rmssd", 38.0, "ms", "whoop"),
-            MetricPoint(d2, "resting_hr", 60.0, "bpm", "whoop"),
+            MetricPoint(d1, "hrv_rmssd", 38.0, "ms", "eight_sleep"),  # < 0.7 * 60 = 42
+            MetricPoint(d1, "resting_hr", 60.0, "bpm", "eight_sleep"),  # > 1.15 * 50 = 57.5
+            MetricPoint(d2, "hrv_rmssd", 38.0, "ms", "eight_sleep"),
+            MetricPoint(d2, "resting_hr", 60.0, "bpm", "eight_sleep"),
         ],
     )
     session.commit()

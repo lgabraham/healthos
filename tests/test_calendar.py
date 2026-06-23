@@ -76,8 +76,8 @@ def _seed_alcohol_scenario(session, start: date, n: int = 31):
     for i in range(n):
         d = start + timedelta(days=i)
         points += [
-            MetricPoint(d, "hrv_rmssd", 60.0, "ms", "whoop"),
-            MetricPoint(d, "resting_hr", 50.0, "bpm", "whoop"),
+            MetricPoint(d, "hrv_rmssd", 60.0, "ms", "eight_sleep"),
+            MetricPoint(d, "resting_hr", 50.0, "bpm", "eight_sleep"),
         ]
         session.add(
             SleepSession(
@@ -99,8 +99,8 @@ def test_alcohol_fires_on_2of3_when_calendar_corroborates(session):
     upsert_metrics(
         session,
         [
-            MetricPoint(target, "hrv_rmssd", 45.0, "ms", "whoop"),  # < 0.85*60
-            MetricPoint(target, "resting_hr", 60.0, "bpm", "whoop"),  # > 1.1*50
+            MetricPoint(target, "hrv_rmssd", 45.0, "ms", "eight_sleep"),  # < 0.85*60
+            MetricPoint(target, "resting_hr", 60.0, "bpm", "eight_sleep"),  # > 1.1*50
         ],
     )
     session.commit()

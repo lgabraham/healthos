@@ -154,26 +154,45 @@ def rolling_baseline(
     return Baseline(metric=metric, mean=sum(values) / len(values), n=len(values))
 
 
+def _bounded_dev(value, base, *, invert=False, cap=0.25):
+    """Fractional deviation of ``value`` from ``base``, clamped to ±cap.
+    invert=True flips the sign (so 'lower is better' reads positive)."""
+    if not base:
+        return None
+    dev = value / base - 1.0
+    if invert:
+        dev = -dev
+    return max(-cap, min(cap, dev))
+
+
 def estimated_recovery(session: Session, day: _date) -> float | None:
     """A Whoop-like recovery estimate (0-100) for days without a real score.
 
-    Heuristic: recovery rises with HRV above your baseline and resting HR below
-    it. Not Whoop's algorithm — a transparent stand-in so gap days aren't blank.
-    Uses best-available HRV/RHR (so an Eight Sleep night counts) and needs a
-    baseline to compare against.
+    Heuristic, not Whoop's algorithm — a transparent stand-in so gap days
+    aren't blank. Each input is a bounded deviation from your own baseline,
+    centered at 55: HRV above baseline and resting HR below it both help, and
+    (now) more sleep than usual helps too — so a genuinely good night scores
+    like one. Uses best-available values, so an Eight Sleep night counts.
     """
     hrv = best_available(session, day, "hrv_rmssd")
     rhr = best_available(session, day, "resting_hr")
     if hrv.value is None or rhr.value is None:
         return None
-    hrv_base = rolling_baseline(session, "hrv_rmssd", day)
-    rhr_base = rolling_baseline(session, "resting_hr", day)
-    if not hrv_base.mean or not rhr_base.mean:
+    hrv_d = _bounded_dev(hrv.value, rolling_baseline(session, "hrv_rmssd", day).mean)
+    rhr_d = _bounded_dev(rhr.value, rolling_baseline(session, "resting_hr", day).mean, invert=True)
+    if hrv_d is None or rhr_d is None:
         return None
-    hrv_ratio = hrv.value / hrv_base.mean  # >1 = better than baseline
-    rhr_ratio = rhr_base.mean / rhr.value  # >1 = better (lower RHR)
-    # Baseline maps to ~55; HRV weighted more heavily than RHR, like Whoop.
-    score = 55 + 70 * (hrv_ratio - 1) + 35 * (rhr_ratio - 1)
+
+    # Sleep duration: more than your norm helps, but with diminishing weight and
+    # a tighter cap (sleeping 11h isn't proportionally "more recovered").
+    sleep = best_available(session, day, "sleep_duration_minutes")
+    sleep_base = rolling_baseline(session, "sleep_duration_minutes", day).mean
+    sleep_d = (
+        _bounded_dev(sleep.value, sleep_base, cap=0.15) if sleep.value and sleep_base else 0.0
+    )
+
+    # Points centered at 55; HRV weighted most, then RHR, then sleep.
+    score = 55 + 120 * hrv_d + 70 * rhr_d + 80 * sleep_d
     return round(max(1.0, min(99.0, score)), 1)
 
 
