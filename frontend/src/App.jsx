@@ -5,12 +5,14 @@ import DailyView from "./views/DailyView.jsx";
 import TrendsView from "./views/TrendsView.jsx";
 import WorkoutsView from "./views/WorkoutsView.jsx";
 import StreakView from "./views/StreakView.jsx";
+import SleepView from "./views/SleepView.jsx";
 
 const VIEWS = {
   daily: { label: "Daily", component: DailyView },
   trends: { label: "Trends", component: TrendsView },
   workouts: { label: "Workouts", component: WorkoutsView },
   streak: { label: "Streak", component: StreakView },
+  sleep: { label: "Sleep", component: SleepView },
 };
 
 function StatusLine() {
