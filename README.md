@@ -147,26 +147,34 @@ inference without re-syncing via `POST /api/admin/reinfer?start=…&end=…` or
 ### Harvia sauna (optional, confirmed events)
 
 If your sauna is a MyHarvia-connected Harvia, set `HARVIA_EMAIL` /
-`HARVIA_PASSWORD` and the sync pulls real heater activity, turning each heating
-session into a **confirmed** `sauna` day-event (`source='harvia'`) — the device
-signal that upgrades the low-confidence Eight Sleep thermal inference. Unset,
-the source is a clean no-op.
+`HARVIA_PASSWORD` to feed **confirmed** `sauna` day-events (`source='harvia'`) —
+the device signal that upgrades the low-confidence Eight Sleep thermal
+inference. Unset, the source is a clean no-op.
 
-MyHarvia is an AWS Amplify backend: auth is Cognito (`USER_PASSWORD_AUTH`),
-device history is AppSync GraphQL at `{HARVIA_ENDPOINT_BASE}/{service}/graphql`.
-Defaults target the app's public values; override per account if needed:
+MyHarvia is an AWS Amplify backend (reverse-engineered from the community HA
+component [`RubenHarms/ha-harvia-xenio-wifi`](https://github.com/RubenHarms/ha-harvia-xenio-wifi)):
+
+1. **Discovery** (unauthenticated): `GET {HARVIA_ENDPOINT_BASE}/{service}/endpoint`
+   for `users`/`device`/`data` returns each service's AppSync GraphQL URL; the
+   `users` response also carries the Cognito `userPoolId` / `clientId`.
+2. **Auth**: AWS Cognito **SRP** via `pycognito` → an IdToken.
+3. **Reads**: `getDeviceTree`, `getDeviceState`, `getLatestData`.
+
+Config (defaults target the app's values; override per account if needed):
 
 - `HARVIA_REGION` (default `eu-west-1`)
-- `HARVIA_COGNITO_CLIENT_ID` — discovered from the `users` service when unset;
-  pin it (captured from the app's traffic) if discovery fails or the pool
-  requires SRP instead of `USER_PASSWORD_AUTH`.
+- `HARVIA_COGNITO_CLIENT_ID` — auto-discovered from the `users` service; only
+  set this to pin it.
 - `HARVIA_ENDPOINT_BASE` (default `https://prod.myharvia-cloud.net`)
 
-The device-history GraphQL shape varies by firmware, so the normalizer is
-permissive. Dump the live payload to finalize it against your account:
+**Capture-then-listen.** MyHarvia exposes only *current* state + the *latest*
+data point plus a live websocket subscription — there is **no history query** —
+so confirmed sessions are recorded by a persistent listener on the always-on
+M1 (not a nightly pull). Before that listener's session-detection is finalized,
+dump your sauna's live shape:
 
 ```bash
-healthos harvia-raw   # prints devices + raw data JSON
+healthos harvia-raw   # device tree + each device's state + latest data JSON
 ```
 
 ## Curating events

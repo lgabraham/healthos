@@ -1,23 +1,26 @@
-"""Harvia sauna sync via the MyHarvia cloud.
+"""Harvia sauna client for the MyHarvia cloud.
 
-The MyHarvia app (Harvia's Xenio/connected saunas) is an AWS Amplify backend:
-authentication is AWS Cognito (user pool), and device state/history come from
-an AWS AppSync GraphQL API at ``{base}/{service}/graphql`` for services
-``users``, ``device``, and ``data``. This module logs in with the user's
-MyHarvia credentials, lists their device(s), pulls recent heater activity, and
-turns each heating session into a *confirmed* ``sauna`` day-event — the real
-device signal that upgrades the low-confidence Eight Sleep thermal inference.
+Reverse-engineered from the community Home Assistant component
+(github.com/RubenHarms/ha-harvia-xenio-wifi), which talks to the same backend
+as the MyHarvia app. The real flow, verified against that source:
 
-Two layers here have different confidence levels:
+1. **Endpoint discovery** (unauthenticated): ``GET {base}/{service}/endpoint``
+   for service in ``users``/``device``/``data`` returns that service's AWS
+   AppSync GraphQL URL. The ``users`` response *also* carries the Cognito
+   ``userPoolId`` / ``clientId`` / ``identityPoolId`` needed to log in.
+2. **Auth**: AWS Cognito **SRP** (via ``pycognito``) → an IdToken.
+3. **GraphQL**: POST to each discovered AppSync URL with ``authorization:
+   <IdToken>``. The useful queries are ``getDeviceTree`` (your devices),
+   ``getDeviceState`` (current desired/reported), and ``getLatestData`` (the
+   newest data point: ``deviceId/timestamp/sessionId/type/data``).
 
-* **Auth + transport** (Cognito ``InitiateAuth`` + GraphQL POST) are standard
-  AWS and implemented exactly. The Cognito client id is normally discovered
-  from the ``users`` service, but can be pinned via ``HARVIA_COGNITO_CLIENT_ID``.
-* **The device-history query and its response shape** are the parts most likely
-  to drift between accounts/firmware. Both the query string and the field names
-  the normalizer looks for are intentionally permissive and overridable, and
-  ``fetch_raw`` (exposed as ``healthos harvia-raw``) dumps the real payload so
-  the query can be finalized against a live account.
+Important architectural note: MyHarvia exposes only *current* state + the
+*latest* data point, plus a live websocket subscription (``onDataUpdates``) —
+there is **no history query**. So a nightly pull can't reliably catch a sauna
+session; that needs a persistent websocket listener (built separately). This
+module currently provides auth/discovery + the read queries and a ``fetch_raw``
+diagnostic (``healthos harvia-raw``) so the live ``data`` shape can be captured
+before the listener's session-detection is finalized.
 
 Unset ``HARVIA_EMAIL`` / ``HARVIA_PASSWORD`` and the source is a clean no-op.
 """
@@ -25,6 +28,7 @@ Unset ``HARVIA_EMAIL`` / ``HARVIA_PASSWORD`` and the source is a clean no-op.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date as _date
 from datetime import datetime, timezone
 
@@ -37,24 +41,20 @@ log = logging.getLogger(__name__)
 
 SOURCE = "harvia"
 
-# Discover the Cognito app client id from the public ``users`` service. The
-# MyHarvia web/app fetch this unauthenticated before logging in.
-_CLIENT_QUERY = "query { getCognitoConfig { ClientId UserPoolId Region } }"
+# AppSync GraphQL services to discover. ``users`` must be first — it carries the
+# Cognito config the other calls need.
+_SERVICES = ("users", "device", "data", "events")
 
-# Recent heater activity for a device. Field names vary by firmware; the
-# normalizer is liberal, and the whole query is overridable via env.
-_DATA_QUERY = (
-    "query Latest($deviceId: String!) {"
-    " getLatestData(deviceId: $deviceId) {"
-    " timestamp active heatOn targetTemp temperature remaining } }"
+# Real queries from the reverse-engineered component (sent to the named service).
+_Q_DEVICE_TREE = "query Query {\n  getDeviceTree\n}\n"
+_Q_DEVICE_STATE = (
+    "query Query($deviceId: ID!) {\n  getDeviceState(deviceId: $deviceId) {\n"
+    "    desired\n    reported\n    timestamp\n    __typename\n  }\n}\n"
 )
-_DEVICES_QUERY = "query { getDevices { id name type } }"
-
-# How long a stretch of consecutive "heater on" samples can gap before we treat
-# it as a new session (seconds). MyHarvia samples roughly per-minute.
-_SESSION_GAP_S = 30 * 60
-# Ignore blips shorter than this — opening the app, a brief test (minutes).
-_MIN_SESSION_MIN = 5
+_Q_LATEST_DATA = (
+    "query Query($deviceId: String!) {\n  getLatestData(deviceId: $deviceId) {\n"
+    "    deviceId\n    timestamp\n    sessionId\n    type\n    data\n    __typename\n  }\n}\n"
+)
 
 
 class HarviaAuthError(RuntimeError):
@@ -62,7 +62,7 @@ class HarviaAuthError(RuntimeError):
 
 
 class HarviaClient:
-    """Cognito-authenticated AppSync GraphQL client for MyHarvia."""
+    """Cognito-SRP-authenticated AppSync client for MyHarvia."""
 
     def __init__(self, transport: httpx.BaseTransport | None = None) -> None:
         if not (settings.harvia_email and settings.harvia_password):
@@ -70,21 +70,71 @@ class HarviaClient:
                 "Harvia credentials missing (HARVIA_EMAIL / HARVIA_PASSWORD)."
             )
         self._client = httpx.Client(timeout=30.0, transport=transport)
+        self._endpoints: dict[str, dict] = {}
         self._id_token: str | None = None
 
-    # -- transport ---------------------------------------------------------
-    def _endpoint(self, service: str) -> str:
-        return f"{settings.harvia_endpoint_base.rstrip('/')}/{service}/graphql"
+    # -- discovery ---------------------------------------------------------
+    def discover(self) -> dict[str, dict]:
+        """Fetch each service's AppSync URL + (for ``users``) the Cognito config.
+        Unauthenticated GETs, exactly as the app bootstraps itself."""
+        if self._endpoints:
+            return self._endpoints
+        base = settings.harvia_endpoint_base.rstrip("/")
+        for service in _SERVICES:
+            resp = self._client.get(f"{base}/{service}/endpoint")
+            if resp.status_code != 200:
+                raise HarviaAuthError(
+                    f"Harvia endpoint discovery failed for '{service}': "
+                    f"{resp.status_code} {resp.text[:200]}"
+                )
+            self._endpoints[service] = resp.json()
+        return self._endpoints
 
-    def _graphql(self, service: str, query: str, variables: dict | None = None,
-                 auth: bool = True) -> dict:
-        headers = {"Content-Type": "application/json"}
-        if auth:
-            headers["Authorization"] = self._token()
+    # -- auth --------------------------------------------------------------
+    def login(self) -> str:
+        """Cognito SRP via pycognito → IdToken. The pool requires SRP (not a
+        plain password grant), so we lean on pycognito rather than hand-rolling
+        it. Raises with a clear message if the dependency or config is missing."""
+        users = self.discover()["users"]
+        pool_id = users.get("userPoolId")
+        client_id = settings.harvia_cognito_client_id or users.get("clientId")
+        if not (pool_id and client_id):
+            raise HarviaAuthError(
+                f"MyHarvia discovery missing Cognito config (got keys: {list(users)})."
+            )
+        try:
+            from pycognito import Cognito
+        except ImportError as exc:  # noqa: TRY003
+            raise HarviaAuthError(
+                "pycognito is required for Harvia auth — `pip install pycognito` "
+                "(or reinstall the package) in the venv."
+            ) from exc
+        u = Cognito(
+            pool_id,
+            client_id,
+            username=settings.harvia_email,
+            user_pool_region=settings.harvia_region,
+        )
+        try:
+            u.authenticate(password=settings.harvia_password)
+        except Exception as exc:  # noqa: BLE001 - surface AWS error verbatim
+            raise HarviaAuthError(f"Harvia Cognito SRP auth failed: {exc}") from exc
+        if not u.id_token:
+            raise HarviaAuthError("Harvia auth ok but no IdToken returned.")
+        self._id_token = u.id_token
+        log.info("Authenticated to MyHarvia.")
+        return self._id_token
+
+    def _token(self) -> str:
+        return self._id_token or self.login()
+
+    # -- graphql -----------------------------------------------------------
+    def _graphql(self, service: str, query: str, variables: dict | None = None) -> dict:
+        url = self.discover()[service]["endpoint"]
         resp = self._client.post(
-            self._endpoint(service),
+            url,
             json={"query": query, "variables": variables or {}},
-            headers=headers,
+            headers={"authorization": self._token()},
         )
         resp.raise_for_status()
         body = resp.json()
@@ -92,131 +142,93 @@ class HarviaClient:
             raise HarviaAuthError(f"Harvia GraphQL error ({service}): {body['errors']}")
         return body.get("data") or {}
 
-    # -- auth --------------------------------------------------------------
-    def _client_id(self) -> str:
-        if settings.harvia_cognito_client_id:
-            return settings.harvia_cognito_client_id
-        try:
-            cfg = self._graphql("users", _CLIENT_QUERY, auth=False).get("getCognitoConfig") or {}
-            cid = cfg.get("ClientId")
-        except Exception as exc:  # noqa: BLE001
-            raise HarviaAuthError(
-                "Could not discover the MyHarvia Cognito client id; set "
-                "HARVIA_COGNITO_CLIENT_ID (capture it from the app's traffic)."
-            ) from exc
-        if not cid:
-            raise HarviaAuthError(
-                "MyHarvia returned no Cognito client id; set HARVIA_COGNITO_CLIENT_ID."
-            )
-        return cid
+    def device_tree(self) -> dict:
+        """Your account's devices. The payload is a JSON-ish tree; ``device_ids``
+        flattens out the ids."""
+        return self._graphql("device", _Q_DEVICE_TREE)
 
-    def login(self) -> str:
-        """Cognito USER_PASSWORD_AUTH → IdToken. Raises with the AWS error body
-        on failure (e.g. the pool requires SRP, or bad credentials)."""
-        url = f"https://cognito-idp.{settings.harvia_region}.amazonaws.com/"
-        payload = {
-            "AuthFlow": "USER_PASSWORD_AUTH",
-            "ClientId": self._client_id(),
-            "AuthParameters": {
-                "USERNAME": settings.harvia_email,
-                "PASSWORD": settings.harvia_password,
-            },
-        }
-        resp = self._client.post(
-            url,
-            json=payload,
-            headers={
-                "Content-Type": "application/x-amz-json-1.1",
-                "X-Amz-Target": "AWSCognitoIdentityProviderService.InitiateAuth",
-            },
-        )
-        if resp.status_code != 200:
-            raise HarviaAuthError(f"Harvia auth failed: {resp.status_code} {resp.text[:300]}")
-        result = resp.json().get("AuthenticationResult") or {}
-        token = result.get("IdToken")
-        if not token:
-            raise HarviaAuthError(f"Harvia auth ok but no IdToken (challenge?): {resp.text[:300]}")
-        self._id_token = token
-        log.info("Authenticated to MyHarvia.")
-        return token
+    def device_state(self, device_id: str) -> dict:
+        return self._graphql("device", _Q_DEVICE_STATE, {"deviceId": device_id})
 
-    def _token(self) -> str:
-        return self._id_token or self.login()
-
-    # -- data --------------------------------------------------------------
-    def devices(self) -> list[dict]:
-        data = self._graphql("device", settings_or(_DEVICES_QUERY, "harvia_devices_query"))
-        return data.get("getDevices") or []
-
-    def device_data(self, device_id: str) -> dict:
-        return self._graphql(
-            "data",
-            settings_or(_DATA_QUERY, "harvia_data_query"),
-            {"deviceId": device_id},
-        )
+    def latest_data(self, device_id: str) -> dict:
+        return self._graphql("data", _Q_LATEST_DATA, {"deviceId": device_id})
 
     def fetch_raw(self) -> dict:
-        """Diagnostic: devices + their raw data payloads, for finalizing the
-        query/normalizer against a live account (`healthos harvia-raw`)."""
-        devs = self.devices()
-        return {"devices": devs, "data": {d.get("id"): self.device_data(d.get("id")) for d in devs if d.get("id")}}
+        """Diagnostic: device tree + each device's current state and latest data,
+        so the live ``data`` shape can be captured (`healthos harvia-raw`)."""
+        tree = self.device_tree()
+        ids = device_ids(tree)
+        return {
+            "device_tree": tree,
+            "devices": {
+                did: {"state": self.device_state(did), "latest": self.latest_data(did)}
+                for did in ids
+            },
+        }
 
     def close(self) -> None:
         self._client.close()
 
 
-def settings_or(default: str, attr: str) -> str:
-    """An optional env override for a GraphQL query string (not in the typed
-    Settings, read leniently so power users can patch a query without a code
-    change)."""
-    return getattr(settings, attr, None) or default
+# UUID-ish device id, e.g. as it appears in the getDeviceTree blob.
+_ID_RE = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
+
+
+def device_ids(tree: dict) -> list[str]:
+    """Extract device ids from getDeviceTree (a JSON string or nested dict).
+    Liberal — the tree shape isn't documented, so we pull any UUIDs we find."""
+    import json
+
+    raw = tree.get("getDeviceTree") if isinstance(tree, dict) else tree
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return list(dict.fromkeys(_ID_RE.findall(raw)))
+    found = _ID_RE.findall(json.dumps(raw))
+    return list(dict.fromkeys(found))
+
+
+def pull(start_date: _date, end_date: _date, client: HarviaClient | None = None) -> dict:
+    """Sync entry point. No-op when unconfigured.
+
+    MyHarvia has no history API, so confirmed sauna sessions are captured by the
+    persistent websocket listener, not this nightly pull — this stays a no-op
+    (returning no events) until that listener lands, so the nightly run neither
+    errors nor writes guesses.
+    """
+    if not (settings.harvia_email and settings.harvia_password):
+        return {}
+    return {"events": []}
+
+
+# --- session helpers (used by the forthcoming listener) -------------------
+# How long a stretch of "heater on" samples can gap before it's a new session.
+_SESSION_GAP_S = 30 * 60
+_MIN_SESSION_MIN = 5
 
 
 def _as_epoch(v) -> float | None:
-    """Coerce a timestamp (epoch seconds/millis or ISO-8601) to epoch seconds."""
     if v is None:
         return None
     if isinstance(v, (int, float)):
-        return v / 1000 if v > 1e11 else float(v)  # millis vs seconds
+        return v / 1000 if v > 1e11 else float(v)
     try:
         return datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp()
     except ValueError:
         return None
 
 
-def _samples(raw: dict) -> list[dict]:
-    """Pull the list of telemetry samples out of a (permissive) data payload."""
-    if not isinstance(raw, dict):
-        return []
-    for key in ("getLatestData", "getData", "data", "items", "samples", "history"):
-        v = raw.get(key)
-        if isinstance(v, list):
-            return v
-        if isinstance(v, dict):  # single sample
-            return [v]
-    return []
+def sessions_from_samples(
+    samples: list[tuple[float, bool]],
+) -> list[tuple[float, float]]:
+    """Collapse (timestamp, heater_on) samples into (start, end) epoch sessions,
+    splitting whenever the gap between on-samples exceeds ``_SESSION_GAP_S``.
 
-
-def _is_on(sample: dict) -> bool:
-    for key in ("active", "heatOn", "heating", "on", "isOn"):
-        if key in sample:
-            return bool(sample[key])
-    return False
-
-
-def _sample_ts(sample: dict) -> float | None:
-    for key in ("timestamp", "ts", "time", "date"):
-        if key in sample:
-            return _as_epoch(sample[key])
-    return None
-
-
-def sessions_from_samples(samples: list[dict]) -> list[tuple[float, float]]:
-    """Collapse "heater on" telemetry samples into (start, end) epoch sessions,
-    splitting whenever the gap between on-samples exceeds ``_SESSION_GAP_S``."""
-    on = sorted(
-        (ts for s in samples if _is_on(s) and (ts := _sample_ts(s)) is not None),
-    )
+    Kept here for the websocket listener: as ``onDataUpdates`` pushes samples,
+    it can reuse this to decide when a heating session has ended.
+    """
+    on = sorted(ts for ts, is_on in samples if is_on)
     sessions: list[tuple[float, float]] = []
     start = prev = None
     for ts in on:
@@ -232,45 +244,18 @@ def sessions_from_samples(samples: list[dict]) -> list[tuple[float, float]]:
     return sessions
 
 
-def normalize(raw_by_device: dict[str, dict], start: _date, end: _date) -> list[EventRecord]:
-    """Turn raw device payloads into one confirmed sauna event per local day in
-    [start, end], with total heating minutes as the value."""
-    minutes_by_date: dict[_date, float] = {}
-    for raw in raw_by_device.values():
-        for s_ts, e_ts in sessions_from_samples(_samples(raw)):
-            minutes = (e_ts - s_ts) / 60
-            if minutes < _MIN_SESSION_MIN:
-                continue
-            day = datetime.fromtimestamp(s_ts, tz=timezone.utc).astimezone(settings.tz).date()
-            if start <= day <= end:
-                minutes_by_date[day] = minutes_by_date.get(day, 0.0) + minutes
-    return [
-        EventRecord(
-            date=day,
-            event_type="sauna",
-            value=round(mins),
-            confidence="confirmed",
-            notes=f"Harvia: {round(mins)} min heating",
-            source=SOURCE,
-        )
-        for day, mins in sorted(minutes_by_date.items())
-    ]
-
-
-def pull(start_date: _date, end_date: _date, client: HarviaClient | None = None) -> dict:
-    """Sync entry point. No-op (empty) when Harvia isn't configured, so the
-    nightly run isn't noisy for users without a connected sauna."""
-    if not (settings.harvia_email and settings.harvia_password):
-        return {}
-    own = client is None
-    client = client or HarviaClient()
-    try:
-        raw_by_device = {
-            d.get("id"): client.device_data(d.get("id"))
-            for d in client.devices()
-            if d.get("id")
-        }
-    finally:
-        if own:
-            client.close()
-    return {"events": normalize(raw_by_device, start_date, end_date)}
+def sauna_event(start_ts: float, end_ts: float) -> EventRecord | None:
+    """A completed heating session -> a confirmed sauna day-event (local date of
+    the start). Returns None for blips below the minimum duration."""
+    minutes = (end_ts - start_ts) / 60
+    if minutes < _MIN_SESSION_MIN:
+        return None
+    day = datetime.fromtimestamp(start_ts, tz=timezone.utc).astimezone(settings.tz).date()
+    return EventRecord(
+        date=day,
+        event_type="sauna",
+        value=round(minutes),
+        confidence="confirmed",
+        notes=f"Harvia: {round(minutes)} min heating",
+        source=SOURCE,
+    )

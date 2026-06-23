@@ -19,6 +19,7 @@ dependencies = [
     "mcp>=1.2.0",
     "icalendar>=5.0",
     "recurring-ical-events>=2.0",
+    "pycognito>=2024.5.1",
 ]
 
 [project.optional-dependencies]

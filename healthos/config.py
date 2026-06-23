@@ -57,11 +57,11 @@ class Settings(BaseSettings):
     )
 
     # Harvia sauna (MyHarvia cloud) ----------------------------------------
-    # The MyHarvia app authenticates against AWS Cognito and talks to an AWS
-    # AppSync GraphQL backend. Credentials are your MyHarvia login; the Cognito
-    # client id / region / endpoint default to the app's public values but are
-    # overridable in case Harvia rotates them or your account is in another
-    # region. Leave email/password unset to disable the source (clean no-op).
+    # The MyHarvia app discovers its AWS AppSync endpoints + Cognito config from
+    # {endpoint_base}/{service}/endpoint, then authenticates via Cognito SRP
+    # (pycognito). Credentials are your MyHarvia login; client id is normally
+    # auto-discovered (pin it only if needed); region/base default to the app's
+    # values. Leave email/password unset to disable the source (clean no-op).
     harvia_email: str | None = Field(default=None, alias="HARVIA_EMAIL")
     harvia_password: str | None = Field(default=None, alias="HARVIA_PASSWORD")
     harvia_region: str = Field(default="eu-west-1", alias="HARVIA_REGION")

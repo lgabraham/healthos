@@ -58,7 +58,7 @@ FastAPI + Postgres 16 + Alembic on the M1; React/Recharts frontend; nightly sync
 - [ ] 90-day Garmin backfill, then re-run inference
 - [ ] launchd service for true always-on
 - [ ] Nightly Apple-steps automation (~11:30pm)
-- [x] Harvia sauna listener (confirmed sauna events via MyHarvia/Cognito+AppSync) — code in `sync/harvia.py`; needs creds + one `harvia-raw` pass to finalize the device query against a live account
+- [~] Harvia sauna listener (confirmed sauna events via MyHarvia) — auth/discovery done in `sync/harvia.py` (Cognito SRP + AppSync, `harvia-raw` diagnostic). MyHarvia has no history API, so the next step is a persistent websocket listener (`onDataUpdates`) on the M1; pending a `harvia-raw` capture to finalize session-detection from the live `data` shape
 - [ ] More Apple Health pushes (weight, mindful minutes, active energy)
 - [ ] Weather/daylight/pressure as passive context
 - [ ] Whole-word calendar matching; PR/merge to main
