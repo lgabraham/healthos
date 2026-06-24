@@ -3,16 +3,17 @@ import { useHealthData } from "../hooks/useHealthData.js";
 import { useRhrOffset, RHR_OFFSETS } from "../hooks/useRhrOffset.js";
 import { Badge } from "@/components/ui/badge";
 
-// A night "counts" toward the sleep streak if you stayed on routine — bedtime
-// within an hour of your median bedtime — OR your resting HR came in at/under
-// target. Either keeps the streak; a miss on both breaks it. Nights with no
-// recorded sleep are skipped (don't extend or break), so sync gaps don't hurt.
+// A night "counts" toward the sleep streak if your resting HR came in at/under
+// target (the primary win) — OR you stayed on routine, bedtime within an hour
+// of your median, as the fallback. Either keeps the streak; missing both breaks
+// it. Nights with no recorded sleep are skipped (don't extend or break), so sync
+// gaps don't hurt.
 const BEDTIME_WINDOW = 60; // minutes around median bedtime that count as "on routine"
 const MILESTONES = [7, 14, 30];
 
 const MARK_COLOR = {
-  routine: "#818cf8", // on-routine bedtime (indigo)
-  recovered: "#2dd4bf", // off-routine but low resting HR (teal)
+  recovered: "#2dd4bf", // low resting HR — the primary win (teal)
+  routine: "#818cf8", // on-routine bedtime, RHR not low — fallback (indigo)
   miss: "#5b1a1a", // off-routine and elevated HR — streak broke
   nodata: "#141414", // no sleep recorded — skipped
   pending: "#1a1a1a", // tonight, not recorded yet
@@ -80,12 +81,12 @@ function computeStreak(nights, haveSleepByDate) {
       n.mark = "nodata";
       continue;
     }
-    if (n.onRoutine) {
-      streak += 1;
-      n.mark = "routine";
-    } else if (n.recovered) {
+    if (n.recovered) {
       streak += 1;
       n.mark = "recovered";
+    } else if (n.onRoutine) {
+      streak += 1;
+      n.mark = "routine";
     } else {
       streak = 0;
       n.mark = "miss";
@@ -165,7 +166,7 @@ export default function SleepView() {
   const { streak, longest } = computeStreak(nights, haveSleep);
   const weeks = toWeeks(nights);
   const last7 = nights.slice(-7).filter((n) => haveSleep.has(n.date));
-  const onRoutineWeek = last7.filter((n) => n.mark === "routine" || n.mark === "recovered").length;
+  const keptThisWeek = last7.filter((n) => n.mark === "routine" || n.mark === "recovered").length;
   const justHit = MILESTONES.includes(streak);
   const tier =
     streak >= 30 ? "🌙 dialed in" : streak >= 14 ? "😴 steady" : streak >= 7 ? "✨ settling in" : streak > 0 ? "keep it going" : "start tonight";
@@ -177,8 +178,9 @@ export default function SleepView() {
         style={{ marginBottom: "0.8rem", display: "flex", alignItems: "center", gap: "0.7rem", flexWrap: "wrap" }}
       >
         <span>
-          a night counts if bedtime is within {BEDTIME_WINDOW}m of your median ({fmtClock(medBed)})
-          {rhrTarget ? " or resting HR is low ·" : " ·"} last 90 nights
+          a night counts if{" "}
+          {rhrTarget ? "resting HR is low or bedtime is within " : "bedtime is within "}
+          {BEDTIME_WINDOW}m of your median ({fmtClock(medBed)}) · last 90 nights
         </span>
         {rhrMedian != null && (
           <span style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
@@ -201,7 +203,7 @@ export default function SleepView() {
             🌙 {streak}
           </div>
           <div className="metric-sub">
-            {justHit ? `🎉 ${streak} nights on routine!` : streak > 0 ? "nights kept going" : "get to bed on time"}
+            {justHit ? `🎉 ${streak} nights kept!` : streak > 0 ? "nights kept going" : "low HR or on time tonight"}
           </div>
         </div>
         <div className="panel hero">
@@ -224,7 +226,7 @@ export default function SleepView() {
         <Badge variant={streak >= 7 ? "default" : "secondary"}>{tier}</Badge>
         <MilestoneStrip streak={streak} />
         <span className="muted mono" style={{ fontSize: "0.72rem", marginLeft: "auto" }}>
-          {onRoutineWeek}/{last7.length || 7} on routine this week
+          {keptThisWeek}/{last7.length || 7} nights kept this week
         </span>
       </div>
 
@@ -261,8 +263,8 @@ export default function SleepView() {
           ))}
         </div>
         <div className="legend" style={{ marginTop: "0.8rem" }}>
-          <span><i style={{ background: MARK_COLOR.routine }} />on routine</span>
           <span><i style={{ background: MARK_COLOR.recovered }} />low RHR</span>
+          <span><i style={{ background: MARK_COLOR.routine }} />on routine</span>
           <span><i style={{ background: MARK_COLOR.miss }} />off routine</span>
           <span><i style={{ background: MARK_COLOR.nodata, border: "1px solid #2a2a2e" }} />no data</span>
         </div>
