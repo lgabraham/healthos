@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .api import admin, auth, events, metrics, webhooks
@@ -56,22 +57,40 @@ def health() -> dict:
     return {"status": "ok", "version": __version__}
 
 
+class _SpaStaticFiles(StaticFiles):
+    """``StaticFiles`` that tolerates a not-yet-built ``dist``.
+
+    Starlette validates the directory exists on the first request (``check_config``)
+    and 500s if it's missing — even with ``check_dir=False``, which only defers
+    that check from init to first request. We skip it entirely so the SPA paths
+    cleanly 404 while ``dist`` is absent (per-file lookup already 404s missing
+    files) and start serving the moment a ``pnpm build`` creates it — no restart,
+    so boot order never matters.
+    """
+
+    async def check_config(self) -> None:  # intentionally a no-op
+        return None
+
+
 def _mount_frontend() -> None:
-    """Serve the built dashboard from the same service when present.
+    """Serve the built dashboard from the same service.
 
     Lets a single Railway deploy host both the API and the SPA (one URL — handy
     on mobile). No-op in dev, where Vite serves the frontend and proxies the API.
+
+    Mounted unconditionally (see ``_SpaStaticFiles``) so a build done *after* the
+    server booted is served without a restart. API routers are registered first,
+    so they take precedence over this catch-all; html=True serves index.html at
+    the root.
     """
     from pathlib import Path
 
-    from fastapi.staticfiles import StaticFiles
-
     dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+    app.mount("/", _SpaStaticFiles(directory=str(dist), html=True, check_dir=False), name="frontend")
     if dist.is_dir():
-        # API routers are registered first, so they take precedence over this
-        # catch-all; html=True serves index.html at the root.
-        app.mount("/", StaticFiles(directory=str(dist), html=True), name="frontend")
         log.info("Serving frontend from %s", dist)
+    else:
+        log.info("Frontend not built yet (%s); will serve once `pnpm build` runs.", dist)
 
 
 _mount_frontend()
