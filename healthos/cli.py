@@ -180,6 +180,19 @@ def _cmd_harvia_raw(_args: argparse.Namespace) -> None:
         client.close()
 
 
+def _cmd_harvia_monitor(_args: argparse.Namespace) -> None:
+    """Poll the Harvia stove and record a confirmed sauna event per session.
+
+    A blocking loop meant to run as an always-on service (see
+    deploy/com.healthos.harvia-monitor.plist). Ctrl-C to stop."""
+    from .sync.harvia_monitor import SaunaMonitor
+
+    try:
+        SaunaMonitor().run()
+    except KeyboardInterrupt:
+        print("\nHarvia monitor stopped.")
+
+
 def _cmd_es_raw(_args: argparse.Namespace) -> None:
     """Map every Eight Sleep device + user and report each one's newest data."""
     from .sync.eight_sleep import EightSleepClient
@@ -321,6 +334,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     hr = sub.add_parser("harvia-raw", help="dump MyHarvia devices + raw data JSON")
     hr.set_defaults(func=_cmd_harvia_raw)
+
+    hm = sub.add_parser(
+        "harvia-monitor", help="poll the sauna live and record confirmed sessions"
+    )
+    hm.set_defaults(func=_cmd_harvia_monitor)
 
     su = sub.add_parser("summary")
     su.add_argument("--date", default=None)

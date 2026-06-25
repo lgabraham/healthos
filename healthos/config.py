@@ -71,6 +71,14 @@ class Settings(BaseSettings):
     harvia_endpoint_base: str = Field(
         default="https://prod.myharvia-cloud.net", alias="HARVIA_ENDPOINT_BASE"
     )
+    # `healthos harvia-monitor` polls the stove's on/off state this often (s).
+    harvia_poll_seconds: int = Field(default=60, alias="HARVIA_POLL_SECONDS")
+    # Where the monitor persists an in-progress session, so a restart (launchd)
+    # mid-session still records the event. Defaults next to .env.
+    harvia_state_file: str = Field(
+        default=str(_PROJECT_ROOT / ".harvia_monitor_state.json"),
+        alias="HARVIA_STATE_FILE",
+    )
 
     # App ------------------------------------------------------------------
     timezone: str = Field(default="America/Los_Angeles", alias="TIMEZONE")

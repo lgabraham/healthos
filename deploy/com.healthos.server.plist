@@ -8,7 +8,7 @@
   <!-- Run uvicorn straight from the venv (no shell activation needed). -->
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/node/sandbox/healthos/.venv/bin/uvicorn</string>
+    <string>/Users/node/healthos/.venv/bin/uvicorn</string>
     <string>healthos.main:app</string>
     <string>--host</string>
     <string>0.0.0.0</string>
@@ -18,12 +18,12 @@
 
   <!-- So pydantic finds .env and the app resolves the project root. -->
   <key>WorkingDirectory</key>
-  <string>/Users/node/sandbox/healthos</string>
+  <string>/Users/node/healthos</string>
 
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key>
-    <string>/Users/node/sandbox/healthos/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <string>/Users/node/healthos/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
   </dict>
 
   <!-- Start at login and restart on crash = always-on. -->
@@ -36,8 +36,8 @@
   <integer>10</integer>
 
   <key>StandardOutPath</key>
-  <string>/Users/node/sandbox/healthos/logs/server.log</string>
+  <string>/Users/node/healthos/logs/server.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/node/sandbox/healthos/logs/server.err.log</string>
+  <string>/Users/node/healthos/logs/server.err.log</string>
 </dict>
 </plist>

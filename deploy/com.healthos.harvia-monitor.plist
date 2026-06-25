@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.healthos.harvia-monitor</string>
+
+  <!-- Run the CLI monitor straight from the venv (no shell activation needed).
+       It polls the sauna's on/off state and records a confirmed sauna event
+       when a heating session ends. Kept separate from the web server so a poll
+       hang/crash can't take the dashboard down, and vice versa. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/node/healthos/.venv/bin/healthos</string>
+    <string>harvia-monitor</string>
+  </array>
+
+  <!-- So pydantic finds .env and the app resolves the project root. -->
+  <key>WorkingDirectory</key>
+  <string>/Users/node/healthos</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/Users/node/healthos/.venv/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <!-- Start at login and restart on crash = always-on. The in-progress session
+       is persisted to a state file, so a restart mid-session still records it. -->
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <!-- Don't hammer-restart if it's failing fast (e.g. auth down). -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/node/healthos/logs/harvia-monitor.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/node/healthos/logs/harvia-monitor.err.log</string>
+</dict>
+</plist>
