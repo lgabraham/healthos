@@ -7,7 +7,9 @@ import { Badge } from "@/components/ui/badge";
 // target (the primary win) — OR you stayed on routine, bedtime within an hour
 // of your median, as the fallback. Either keeps the streak; missing both breaks
 // it. Nights with no recorded sleep are skipped (don't extend or break), so sync
-// gaps don't hurt.
+// gaps don't hurt. The night before a travel day (a calendar event tagged
+// "travel") is likewise skipped — an early flight or pre-trip packing shouldn't
+// count against the streak.
 const BEDTIME_WINDOW = 60; // minutes around median bedtime that count as "on routine"
 const MILESTONES = [7, 14, 30];
 
@@ -15,6 +17,7 @@ const MARK_COLOR = {
   recovered: "#2dd4bf", // low resting HR — the primary win (teal)
   routine: "#818cf8", // on-routine bedtime, RHR not low — fallback (indigo)
   miss: "#5b1a1a", // off-routine and elevated HR — streak broke
+  travel: "#3f3f5e", // night before a travel day — skipped (muted indigo)
   nodata: "#141414", // no sleep recorded — skipped
   pending: "#1a1a1a", // tonight, not recorded yet
 };
@@ -67,7 +70,7 @@ function buildNights(sleep, rhrSeries, rhrTarget, medBed) {
   });
 }
 
-function computeStreak(nights, haveSleepByDate) {
+function computeStreak(nights, haveSleepByDate, travelDays) {
   // Walk every calendar day in range so a night with no sleep is a true gap.
   const today = todayISO();
   let streak = 0;
@@ -79,6 +82,11 @@ function computeStreak(nights, haveSleepByDate) {
     }
     if (!haveSleepByDate.has(n.date)) {
       n.mark = "nodata";
+      continue;
+    }
+    if (travelDays.has(n.date)) {
+      // Night before a travel day: a free pass — neither extends nor breaks.
+      n.mark = "travel";
       continue;
     }
     if (n.recovered) {
@@ -102,6 +110,7 @@ function markLabel(n) {
   if (n.mark === "routine") return `on routine · ${bedStr}${rhrStr}`;
   if (n.mark === "recovered") return `low RHR${rhrStr} · ${bedStr}`;
   if (n.mark === "miss") return `off routine · ${bedStr}${rhrStr}`;
+  if (n.mark === "travel") return `travel eve — skipped · ${bedStr}${rhrStr}`;
   if (n.mark === "pending") return "tonight — not recorded yet";
   return "no sleep recorded";
 }
@@ -141,6 +150,7 @@ export default function SleepView() {
   const [rhrOffset, setRhrOffset] = useRhrOffset();
   const { data: sleep, loading, error } = useHealthData(() => api.sleep(90), []);
   const { data: rhr } = useHealthData(() => api.trend("resting_hr", 90, 1), []);
+  const { data: calendar } = useHealthData(() => api.calendar(90), []);
 
   if (loading) return <div className="muted mono">loading…</div>;
   if (error) return <div className="error">error: {error}</div>;
@@ -162,10 +172,18 @@ export default function SleepView() {
   const rhrTarget = rhrMedian == null ? null : rhrMedian + rhrOffset;
 
   const haveSleep = new Set((sleep || []).map((s) => s.date));
+  // A "travel day" is any calendar date tagged "travel" (flight/airport/trip…);
+  // the night dated that day is the night right before you set out (HealthOS
+  // dates a night by the morning it ends), so it's the one we skip.
+  const travelDays = new Set(
+    (calendar || []).filter((c) => (c.keywords || []).includes("travel")).map((c) => c.date)
+  );
   const nights = buildNights(sleep, rhr?.series, rhrTarget, medBed);
-  const { streak, longest } = computeStreak(nights, haveSleep);
+  const { streak, longest } = computeStreak(nights, haveSleep, travelDays);
   const weeks = toWeeks(nights);
-  const last7 = nights.slice(-7).filter((n) => haveSleep.has(n.date));
+  // Skipped nights (travel) are excluded from the weekly "kept" ratio so they
+  // neither help nor hurt it.
+  const last7 = nights.slice(-7).filter((n) => haveSleep.has(n.date) && n.mark !== "travel");
   const keptThisWeek = last7.filter((n) => n.mark === "routine" || n.mark === "recovered").length;
   const justHit = MILESTONES.includes(streak);
   const tier =
@@ -266,6 +284,7 @@ export default function SleepView() {
           <span><i style={{ background: MARK_COLOR.recovered }} />low RHR</span>
           <span><i style={{ background: MARK_COLOR.routine }} />on routine</span>
           <span><i style={{ background: MARK_COLOR.miss }} />off routine</span>
+          <span><i style={{ background: MARK_COLOR.travel }} />travel eve (skipped)</span>
           <span><i style={{ background: MARK_COLOR.nodata, border: "1px solid #2a2a2e" }} />no data</span>
         </div>
       </div>
