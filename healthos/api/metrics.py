@@ -8,10 +8,12 @@ are converted to local time here so the frontend can render them directly.
 from __future__ import annotations
 
 import threading
+import uuid as _uuid
 from datetime import date as _date
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
@@ -230,6 +232,59 @@ def workout_history(
         .order_by(Workout.start_time.desc().nullslast(), Workout.date.desc())
     ).all()
     return [_workout_dict(w) for w in rows]
+
+
+class WorkoutIn(BaseModel):
+    sport_type: str = Field(..., examples=["run", "strength", "tennis"])
+    date: str | None = Field(default=None, examples=["2026-06-26"])  # defaults to today
+    duration_minutes: int | None = Field(default=None, ge=0, examples=[45])
+    distance_km: float | None = Field(default=None, ge=0)
+    calories: int | None = Field(default=None, ge=0)
+    hr_avg: int | None = Field(default=None, ge=0)
+
+
+@router.post("/workouts")
+def create_workout(payload: WorkoutIn, db: Session = Depends(db_session)) -> dict:
+    """Manually log a workout telemetry missed (source='manual').
+
+    Manual rows use source 'manual', so the nightly replace-sync (which only
+    clears device sources in its window) never wipes them.
+    """
+    sport = payload.sport_type.strip()
+    if not sport:
+        raise HTTPException(status_code=400, detail="sport_type required.")
+    day = _date.fromisoformat(payload.date) if payload.date else _date.today()
+    w = Workout(
+        date=day,
+        source="manual",
+        sport_type=sport,
+        duration_minutes=payload.duration_minutes,
+        distance_km=payload.distance_km,
+        calories=payload.calories,
+        hr_avg=payload.hr_avg,
+    )
+    db.add(w)
+    db.commit()
+    db.refresh(w)
+    return _workout_dict(w)
+
+
+@router.delete("/workouts/{workout_id}")
+def delete_workout(workout_id: str, db: Session = Depends(db_session)) -> dict:
+    """Delete a manually-logged workout. Device-synced rows aren't deletable here
+    (they'd just reappear on the next sync)."""
+    try:
+        wid = _uuid.UUID(workout_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Bad id.") from exc
+    w = db.get(Workout, wid)
+    if w is None:
+        raise HTTPException(status_code=404, detail="No such workout.")
+    if w.source != "manual":
+        raise HTTPException(status_code=400, detail="Only manual workouts can be deleted here.")
+    db.delete(w)
+    db.commit()
+    return {"ok": True, "deleted": workout_id}
 
 
 @router.get("/events")
@@ -598,6 +653,7 @@ def _workout_dict(w: Workout | None) -> dict | None:
     if w is None:
         return None
     return {
+        "id": str(w.id),
         "date": w.date.isoformat(),
         "source": w.source,
         "sport_type": w.sport_type,

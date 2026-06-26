@@ -41,4 +41,15 @@ export const api = {
     }),
   deleteJournal: (id) =>
     fetch(`${BASE}/api/journal/${id}`, { method: "DELETE" }).then((r) => r.json()),
+  addWorkout: (workout) =>
+    fetch(`${BASE}/api/workouts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(workout),
+    }).then((r) => {
+      if (!r.ok) throw new Error(`workout -> ${r.status}`);
+      return r.json();
+    }),
+  deleteWorkout: (id) =>
+    fetch(`${BASE}/api/workouts/${id}`, { method: "DELETE" }).then((r) => r.json()),
 };
