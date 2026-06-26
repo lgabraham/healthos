@@ -164,3 +164,21 @@ class OAuthToken(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class IntakeLog(Base):
+    """A free-text food / medication / supplement journal entry, tagged for
+    behavioral correlation (NSAID / alcohol / dairy … vs next-day biomarkers).
+
+    Unlike daily_events (one canonical row per date+type), the journal is
+    append-only: several entries per day are expected, so there's no upsert key.
+    """
+
+    __tablename__ = "intake_log"
+
+    id: Mapped[uuid.UUID] = _uuid_col()
+    date: Mapped[_date] = mapped_column(Date, nullable=False, index=True)
+    raw_text: Mapped[str] = mapped_column(Text, nullable=False)
+    tags: Mapped[list | None] = mapped_column(JSONB)  # parsed exposure tags
+    source: Mapped[str] = mapped_column(String(50), nullable=False, server_default="manual")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

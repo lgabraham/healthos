@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .api import admin, auth, events, metrics, webhooks
+from .api import admin, auth, events, journal, metrics, webhooks
 from .config import settings
 from .sync.scheduler import shutdown_scheduler, start_scheduler
 
@@ -49,6 +49,7 @@ app.include_router(webhooks.router)
 app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(events.router)
+app.include_router(journal.router)
 
 
 @app.get("/health")

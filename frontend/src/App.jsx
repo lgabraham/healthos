@@ -4,15 +4,15 @@ import { useHealthData } from "./hooks/useHealthData.js";
 import DailyView from "./views/DailyView.jsx";
 import TrendsView from "./views/TrendsView.jsx";
 import WorkoutsView from "./views/WorkoutsView.jsx";
-import StreakView from "./views/StreakView.jsx";
-import SleepView from "./views/SleepView.jsx";
+import StreaksView from "./views/StreaksView.jsx";
+import JournalView from "./views/JournalView.jsx";
 
 const VIEWS = {
   daily: { label: "Daily", component: DailyView },
-  sleep: { label: "Sleep", component: SleepView },
+  streak: { label: "Streak", component: StreaksView },
   trends: { label: "Trends", component: TrendsView },
-  streak: { label: "Streak", component: StreakView },
   workouts: { label: "Workouts", component: WorkoutsView },
+  journal: { label: "Journal", component: JournalView },
 };
 
 function StatusLine() {
@@ -69,6 +69,7 @@ function RefreshButton() {
 
 function viewFromHash() {
   const h = window.location.hash.replace("#", "");
+  if (h === "sleep") return "streak"; // sleep was folded into the streak tab
   return h in VIEWS ? h : "daily";
 }
 

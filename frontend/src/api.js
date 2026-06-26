@@ -29,4 +29,27 @@ export const api = {
   triggerSync: (days = 7) =>
     fetch(`${BASE}/api/sync?days=${days}`, { method: "POST" }).then((r) => r.json()),
   syncStatus: () => get("/api/sync/status"),
+  journal: (days = 30) => get(`/api/journal?days=${days}`),
+  addJournal: (text, date) =>
+    fetch(`${BASE}/api/journal`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, date }),
+    }).then((r) => {
+      if (!r.ok) throw new Error(`journal -> ${r.status}`);
+      return r.json();
+    }),
+  deleteJournal: (id) =>
+    fetch(`${BASE}/api/journal/${id}`, { method: "DELETE" }).then((r) => r.json()),
+  addWorkout: (workout) =>
+    fetch(`${BASE}/api/workouts`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(workout),
+    }).then((r) => {
+      if (!r.ok) throw new Error(`workout -> ${r.status}`);
+      return r.json();
+    }),
+  deleteWorkout: (id) =>
+    fetch(`${BASE}/api/workouts/${id}`, { method: "DELETE" }).then((r) => r.json()),
 };
