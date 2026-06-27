@@ -42,6 +42,9 @@ def test_tag_keywords():
     assert "travel" in tag_keywords("Flight home", "SFO Airport")
     assert "work" in tag_keywords("Sprint Planning", None)
     assert tag_keywords("Pick up groceries", None) == []  # unclassified -> none
+    # whole-word matching: "department" must NOT trip the "depart" travel keyword
+    assert "travel" not in tag_keywords("Department all-hands", None)
+    assert "travel" in tag_keywords("Field trip", None)  # but a real "trip" does
 
 
 def test_parse_feed_expands_and_tags():
