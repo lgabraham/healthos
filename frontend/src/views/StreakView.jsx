@@ -120,10 +120,11 @@ export default function StreakView() {
   const tier = streak >= 20 ? "🔥 on fire" : streak >= 10 ? "💪 strong" : streak >= 5 ? "✨ rolling" : streak > 0 ? "keep it going" : "start today";
 
   return (
-    <>
+    // order: graph (1) → streak stats (2,3) → the rules + step-goal toggle (4)
+    <div style={{ display: "flex", flexDirection: "column" }}>
       <div
         className="statusline"
-        style={{ marginBottom: "0.8rem", display: "flex", alignItems: "center", gap: "0.7rem", flexWrap: "wrap" }}
+        style={{ order: 4, marginBottom: 0, marginTop: "0.85rem", display: "flex", alignItems: "center", gap: "0.7rem", flexWrap: "wrap" }}
       >
         <span>
           a day counts if you worked out or hit {goal.toLocaleString()} steps · one weekday rest is
@@ -132,7 +133,7 @@ export default function StreakView() {
         <StepGoalToggle value={goal} onChange={setGoal} />
       </div>
 
-      <div className="grid cols-3" style={{ marginBottom: "0.85rem" }}>
+      <div className="grid cols-3" style={{ order: 2, marginBottom: "0.85rem" }}>
         <div className="panel hero">
           <div className="label">Current streak</div>
           <div className="metric-value xl" style={{ color: streak > 0 ? "var(--accent)" : "var(--muted)" }}>
@@ -154,12 +155,12 @@ export default function StreakView() {
         </div>
       </div>
 
-      <div className="panel" style={{ marginBottom: "0.85rem", display: "flex", alignItems: "center", gap: "0.8rem", flexWrap: "wrap" }}>
+      <div className="panel" style={{ order: 3, marginBottom: "0.85rem", display: "flex", alignItems: "center", gap: "0.8rem", flexWrap: "wrap" }}>
         <Badge variant={streak >= 5 ? "default" : "secondary"}>{tier}</Badge>
         <MilestoneStrip streak={streak} />
       </div>
 
-      <div className="panel" style={{ overflowX: "auto" }}>
+      <div className="panel" style={{ order: 1, marginBottom: "0.85rem", overflowX: "auto" }}>
         <div className="label">Last 90 days</div>
         <div style={{ display: "flex", gap: "3px", marginTop: "0.4rem", width: "max-content" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: "3px", marginRight: "4px" }}>
@@ -198,6 +199,6 @@ export default function StreakView() {
           <span><i style={{ background: MARK_COLOR.broken }} />broke streak</span>
         </div>
       </div>
-    </>
+    </div>
   );
 }
