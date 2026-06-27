@@ -8,6 +8,7 @@ are stored for the local dashboard but redacted by the MCP server.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import date as _date
 from datetime import datetime, timedelta
 
@@ -72,11 +73,19 @@ KEYWORD_TAGS: dict[str, str] = {
 }
 
 
+# Whole-word patterns (precompiled): "department" no longer trips the "depart"
+# travel keyword, while "at the bar" now matches "bar". Trailing-space hacks in
+# the keyword keys (e.g. "bar ") are normalized away by the boundary match.
+_KEYWORD_PATTERNS = [
+    (re.compile(rf"\b{re.escape(kw.strip())}\b"), tag) for kw, tag in KEYWORD_TAGS.items()
+]
+
+
 def tag_keywords(title: str | None, location: str | None) -> list[str]:
     text = f"{title or ''} {location or ''}".lower()
     tags: list[str] = []
-    for kw, tag in KEYWORD_TAGS.items():
-        if kw in text and tag not in tags:
+    for pattern, tag in _KEYWORD_PATTERNS:
+        if pattern.search(text) and tag not in tags:
             tags.append(tag)
     return tags
 

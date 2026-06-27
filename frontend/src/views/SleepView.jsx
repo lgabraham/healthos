@@ -26,6 +26,18 @@ function todayISO() {
   return new Date().toLocaleDateString("en-CA");
 }
 
+function shiftDate(iso, days) {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return d.toLocaleDateString("en-CA");
+}
+
+// Whole-word travel match, derived from the event text rather than the stored
+// keywords (which historically used substring matching and mis-tagged words
+// like "department" → travel). "departure"/"departing" count; "department" does
+// not. A travel day's *prior* night is the one skipped.
+const TRAVEL_RE = /\b(flights?|airport|layover|depart(?:ure|ing)?|trips?)\b/i;
+
 // Wall-clock minutes relative to noon: evening bedtimes land ~540–840, morning
 // wakes ~1080–1140, so a normal night is monotonic and never wraps midnight.
 // Parses the HH:MM straight out of the local ISO string (no tz math needed).
@@ -58,16 +70,29 @@ function spread(arr, med) {
   return arr.reduce((a, v) => a + Math.abs(v - med), 0) / arr.length;
 }
 
-function buildNights(sleep, rhrSeries, rhrTarget, medBed) {
+function buildNights(sleep, rhrSeries, rhrTarget, medBed, days = 90) {
   const rhrByDate = {};
   for (const d of rhrSeries || []) if (d.value != null) rhrByDate[d.date] = d.value;
-  return (sleep || []).map((s) => {
+  const sleepByDate = {};
+  for (const s of sleep || []) sleepByDate[s.date] = s;
+  // One entry per calendar day for the last `days` (ending today), so nights
+  // with no recorded sleep render as real "no data" gaps and the weekday columns
+  // stay aligned — the grid always lands on today.
+  const out = [];
+  const end = todayISO();
+  for (let day = shiftDate(end, -(days - 1)); day <= end; day = shiftDate(day, 1)) {
+    const s = sleepByDate[day];
+    if (!s) {
+      out.push({ date: day }); // no sleep recorded -> "no data" / "pending" (today)
+      continue;
+    }
     const bed = minutesFromNoon(s.start_time);
     const onRoutine = bed != null && medBed != null && Math.abs(bed - medBed) <= BEDTIME_WINDOW;
-    const rhr = rhrByDate[s.date] ?? null;
+    const rhr = rhrByDate[day] ?? null;
     const recovered = rhr != null && rhrTarget != null && rhr <= rhrTarget;
-    return { date: s.date, bed, wake: minutesFromNoon(s.end_time), rhr, onRoutine, recovered };
-  });
+    out.push({ date: day, bed, wake: minutesFromNoon(s.end_time), rhr, onRoutine, recovered });
+  }
+  return out;
 }
 
 function computeStreak(nights, haveSleepByDate, travelDays) {
@@ -172,11 +197,14 @@ export default function SleepView() {
   const rhrTarget = rhrMedian == null ? null : rhrMedian + rhrOffset;
 
   const haveSleep = new Set((sleep || []).map((s) => s.date));
-  // A "travel day" is any calendar date tagged "travel" (flight/airport/trip…);
-  // the night dated that day is the night right before you set out (HealthOS
-  // dates a night by the morning it ends), so it's the one we skip.
+  // A "travel day" is any calendar date with a flight/airport/trip event (matched
+  // whole-word from the event text — see TRAVEL_RE). HealthOS dates a night by the
+  // morning it ends, so the night dated that day is the one right before you set
+  // out — that's the night skipped.
   const travelDays = new Set(
-    (calendar || []).filter((c) => (c.keywords || []).includes("travel")).map((c) => c.date)
+    (calendar || [])
+      .filter((c) => TRAVEL_RE.test(`${c.title || ""} ${c.location || ""}`))
+      .map((c) => c.date)
   );
   const nights = buildNights(sleep, rhr?.series, rhrTarget, medBed);
   const { streak, longest } = computeStreak(nights, haveSleep, travelDays);
@@ -271,8 +299,15 @@ export default function SleepView() {
                       width: 14,
                       height: 14,
                       borderRadius: 2,
-                      background: MARK_COLOR[n.mark] || "#141414",
-                      border: n.mark === "nodata" || n.mark === "pending" ? "1px solid #2a2a2e" : "none",
+                      // "no data" reads as a hollow dashed cell so it's clearly
+                      // distinct from the filled travel/miss marks.
+                      background: n.mark === "nodata" ? "transparent" : MARK_COLOR[n.mark] || "#141414",
+                      border:
+                        n.mark === "nodata"
+                          ? "1px dashed var(--border)"
+                          : n.mark === "pending"
+                            ? "1px solid var(--border)"
+                            : "none",
                     }}
                   />
                 );
@@ -285,7 +320,7 @@ export default function SleepView() {
           <span><i style={{ background: MARK_COLOR.routine }} />on routine</span>
           <span><i style={{ background: MARK_COLOR.miss }} />off routine</span>
           <span><i style={{ background: MARK_COLOR.travel }} />travel eve (skipped)</span>
-          <span><i style={{ background: MARK_COLOR.nodata, border: "1px solid #2a2a2e" }} />no data</span>
+          <span><i style={{ background: "transparent", border: "1px dashed var(--border)" }} />no data</span>
         </div>
       </div>
     </>

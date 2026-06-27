@@ -1,8 +1,10 @@
 import SleepView from "./SleepView.jsx";
 import StreakView from "./StreakView.jsx";
 
-// Sleep and activity streaks live on one "Streak" tab, stacked — no toggle.
-function SectionHeading({ children, divider }) {
+// Sleep and activity streaks sit side by side (two columns on a wide screen,
+// stacking only when there isn't room) so neither requires scrolling past the
+// other.
+function SectionHeading({ children }) {
   return (
     <div
       style={{
@@ -11,9 +13,7 @@ function SectionHeading({ children, divider }) {
         letterSpacing: "0.08em",
         textTransform: "uppercase",
         color: "var(--muted)",
-        margin: divider ? "1.6rem 0 0.8rem" : "0 0 0.8rem",
-        paddingTop: divider ? "1.1rem" : 0,
-        borderTop: divider ? "1px solid var(--border)" : "none",
+        margin: "0 0 0.8rem",
       }}
     >
       {children}
@@ -23,11 +23,22 @@ function SectionHeading({ children, divider }) {
 
 export default function StreaksView() {
   return (
-    <>
-      <SectionHeading>Sleep</SectionHeading>
-      <SleepView />
-      <SectionHeading divider>Activity</SectionHeading>
-      <StreakView />
-    </>
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(440px, 1fr))",
+        gap: "1.5rem",
+        alignItems: "start",
+      }}
+    >
+      <div>
+        <SectionHeading>Sleep</SectionHeading>
+        <SleepView />
+      </div>
+      <div>
+        <SectionHeading>Activity</SectionHeading>
+        <StreakView />
+      </div>
+    </div>
   );
 }

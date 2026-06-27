@@ -104,7 +104,7 @@ function HeroSleep({ sleep }) {
 }
 
 export default function DailyView() {
-  const [date, setDate] = useState(null); // null = latest complete day (server picks)
+  const [date, setDate] = useState(todayISO()); // land on today; "latest" button -> null
   const [showAll, setShowAll] = useState(false);
   const { data: daily, loading, error } = useHealthData(() => api.daily(date), [date]);
   const { data: hrvTrend } = useHealthData(() => api.trend("hrv_rmssd", 30, 7), []);
@@ -130,6 +130,7 @@ export default function DailyView() {
   if (!daily) return null;
 
   const m = daily.metrics;
+  const hasData = Object.values(m).some((x) => x && x.value != null) || daily.sleep != null;
   const wk = daily.last_workout;
   const wkAge = wk ? daysAgo(wk.date, daily.date) : null;
   const wkStale = wkAge != null && wkAge > 7;
@@ -159,6 +160,22 @@ export default function DailyView() {
       </div>
 
       <div style={loading ? { opacity: 0.45, pointerEvents: "none" } : undefined}>
+        {!hasData ? (
+          <div className="panel" style={{ textAlign: "center", padding: "2.2rem 1rem" }}>
+            <div className="metric-value" style={{ color: "var(--muted)" }}>No data for {daily.date}</div>
+            <div className="metric-sub" style={{ marginTop: "0.45rem" }}>
+              {daily.date >= today
+                ? "today's metrics sync after your night + the morning recovery upload"
+                : "nothing was recorded for this day"}
+            </div>
+            {date !== null && (
+              <button className="ghost" style={{ marginTop: "0.9rem" }} onClick={() => setDate(null)}>
+                view latest complete day
+              </button>
+            )}
+          </div>
+        ) : (
+        <>
         {/* The three headline signals. Everything else lives under the toggle. */}
         <div className="grid cols-3">
           <HeroMetric
@@ -228,6 +245,8 @@ export default function DailyView() {
               </div>
             </div>
           </>
+        )}
+        </>
         )}
       </div>
     </>
