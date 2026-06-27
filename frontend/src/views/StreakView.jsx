@@ -1,11 +1,12 @@
 import { api } from "../api.js";
 import { useHealthData } from "../hooks/useHealthData.js";
 import { useStepGoal } from "../hooks/useStepGoal.js";
-import StepGoalToggle from "../components/StepGoalToggle.jsx";
+import { useSkipDays, SKIP_DAYS } from "../hooks/useSkipDays.js";
 import { Badge } from "@/components/ui/badge";
 
-// A day "counts" if you worked out OR hit the step goal. One rest day is fine;
-// two rest days in a row breaks the streak.
+// A day "counts" if you worked out OR hit the step goal. Up to `allowedSkips`
+// weekday rest days in a row are forgiven (weekends are always free); the next
+// consecutive weekday rest breaks the streak.
 const MILESTONES = [5, 10, 20];
 
 const MARK_COLOR = {
@@ -30,11 +31,11 @@ function buildDays(stepsSeries, workouts, goal) {
   });
 }
 
-function computeStreak(days) {
+function computeStreak(days, allowedSkips) {
   const today = todayISO();
   let streak = 0;
   let longest = 0;
-  let prevRest = false;
+  let restRun = 0; // consecutive weekday rest days (weekends don't count)
   for (const d of days) {
     const dow = new Date(`${d.date}T00:00:00`).getDay();
     const weekend = dow === 0 || dow === 6;
@@ -44,18 +45,17 @@ function computeStreak(days) {
     }
     if (d.active) {
       streak += 1;
-      prevRest = false;
+      restRun = 0;
       d.mark = d.worked ? "workout" : "steps";
     } else if (weekend) {
-      // Weekends are free: never break, and don't use up your weekday rest.
+      // Weekends are free: never break, and don't use up an allowed skip.
       streak += 1;
       d.mark = "weekend";
-    } else if (prevRest) {
+    } else if (++restRun > allowedSkips) {
       streak = 0;
       d.mark = "broken";
     } else {
       streak += 1;
-      prevRest = true;
       d.mark = "rest";
     }
     longest = Math.max(longest, streak);
@@ -104,7 +104,8 @@ function MilestoneStrip({ streak }) {
 }
 
 export default function StreakView() {
-  const [goal, setGoal] = useStepGoal();
+  const [goal] = useStepGoal(); // step goal is tuned on the Workouts tab
+  const [skipDays, setSkipDays] = useSkipDays();
   const { data: steps, loading, error } = useHealthData(() => api.trend("steps", 90), []);
   const { data: workouts } = useHealthData(() => api.workouts(90), []);
 
@@ -112,7 +113,7 @@ export default function StreakView() {
   if (error) return <div className="error">error: {error}</div>;
 
   const days = buildDays(steps?.series, workouts, goal);
-  const { streak, longest } = computeStreak(days);
+  const { streak, longest } = computeStreak(days, skipDays);
   const weeks = toWeeks(days);
   const last7 = days.slice(-7);
   const activeThisWeek = last7.filter((d) => d.active).length;
@@ -127,10 +128,22 @@ export default function StreakView() {
         style={{ order: 4, marginBottom: 0, marginTop: "0.85rem", display: "flex", alignItems: "center", gap: "0.7rem", flexWrap: "wrap" }}
       >
         <span>
-          a day counts if you worked out or hit {goal.toLocaleString()} steps · one weekday rest is
-          fine, two in a row breaks it · weekends are free
+          a day counts if you worked out or hit {goal.toLocaleString()} steps ·{" "}
+          {skipDays === 0
+            ? "every weekday must count"
+            : `up to ${skipDays} weekday skip${skipDays > 1 ? "s" : ""} in a row is fine`}{" "}
+          · weekends are free
         </span>
-        <StepGoalToggle value={goal} onChange={setGoal} />
+        <span style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+          <span className="muted" style={{ fontSize: "0.72rem" }}>skip days</span>
+          <div className="toggle">
+            {SKIP_DAYS.map((n) => (
+              <button key={n} className={skipDays === n ? "active" : ""} onClick={() => setSkipDays(n)}>
+                {n}
+              </button>
+            ))}
+          </div>
+        </span>
       </div>
 
       <div className="grid cols-3" style={{ order: 2, marginBottom: "0.85rem" }}>
