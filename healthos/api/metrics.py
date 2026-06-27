@@ -210,15 +210,17 @@ def sleep_history(
     days: int = Query(default=30, ge=1, le=365),
     db: Session = Depends(db_session),
 ) -> list[dict]:
-    rows = db.scalars(
-        select(SleepSession)
-        .where(
-            SleepSession.is_canonical.is_(True),
-            SleepSession.date >= _date.today() - timedelta(days=days),
-        )
-        .order_by(SleepSession.date.asc())
-    ).all()
-    return [_sleep_dict(s) for s in rows]
+    """One sleep session per day over the window, preferring the canonical source
+    (Eight Sleep) and falling back to whatever else reported — e.g. Whoop while
+    traveling without the pod — so the streak grid stays filled on the road."""
+    today = _date.today()
+    out: list[dict] = []
+    for i in range(days):
+        s = best_available_sleep(db, today - timedelta(days=i))
+        if s is not None:
+            out.append(_sleep_dict(s))
+    out.reverse()  # ascending by date
+    return out
 
 
 @router.get("/workouts")
