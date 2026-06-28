@@ -49,7 +49,8 @@ function minutesFromNoon(iso) {
 
 function fmtClock(mfn) {
   if (mfn == null) return "—";
-  const t = (((mfn + 720) % 1440) + 1440) % 1440;
+  // Round to whole minutes (a median can land on a half-minute -> "9:53.5pm").
+  const t = Math.round((((mfn + 720) % 1440) + 1440) % 1440) % 1440;
   let h = Math.floor(t / 60);
   const min = t % 60;
   const ap = h < 12 ? "am" : "pm";
