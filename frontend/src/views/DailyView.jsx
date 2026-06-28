@@ -156,6 +156,7 @@ const INFLAMMATION_MARKERS = [
   { key: "skin_temp", label: "skin temp", bad: "up", thresh: 1.5 },
   { key: "resting_hr", label: "resting HR", bad: "up", thresh: 5 },
   { key: "hrv_rmssd", label: "HRV", bad: "down", thresh: 7 },
+  { key: "spo2", label: "SpO₂", bad: "down", thresh: 2 },
 ];
 
 function InflammationRead({ m }) {
