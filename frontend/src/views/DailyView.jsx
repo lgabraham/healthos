@@ -274,14 +274,8 @@ export default function DailyView() {
           </div>
         ) : (
         <>
-        {/* Readiness + inflammation — the two headline reads. */}
-        <div className="grid cols-2">
-          <RecoveryScore metric={m.recovery_score} />
-          <InflammationRead m={m} />
-        </div>
-
         {/* The headline signals. */}
-        <div className="grid cols-3" style={{ marginTop: "0.85rem" }}>
+        <div className="grid cols-3">
           <HeroMetric
             label="HRV (nocturnal)"
             metric={m.hrv_rmssd}
@@ -299,13 +293,11 @@ export default function DailyView() {
           <HeroSleep sleep={daily.sleep} />
         </div>
 
-        {/* The "why" behind today. */}
+        {/* Inflammation: a one-line read summarizing the relevant vitals below.
+            Elevated resp rate / skin temp + low HRV is the flare signature. */}
         <div className="grid" style={{ marginTop: "0.85rem" }}>
-          <AttributionPanel date={daily.date} />
+          <InflammationRead m={m} />
         </div>
-
-        {/* Inflammation-relevant vitals — elevated resp rate / skin temp + low
-            HRV is the wearable signature of an inflammatory flare. */}
         <div className="grid cols-3" style={{ marginTop: "0.85rem" }}>
           <MetricStat label="Respiratory rate" metric={m.respiratory_rate} unit="br/min" digits={1} neutral />
           <MetricStat label="Skin temp" metric={m.skin_temp} unit="°C" digits={1} neutral />
@@ -320,9 +312,14 @@ export default function DailyView() {
 
         {showAll && (
           <>
-            <div className="grid cols-2">
+            <div className="grid cols-3">
+              <RecoveryScore metric={m.recovery_score} />
               <MetricStat label="Strain" metric={m.strain_score} digits={1} neutral />
               <MetricStat label="Steps" metric={m.steps} neutral />
+            </div>
+
+            <div className="grid" style={{ marginTop: "0.85rem" }}>
+              <AttributionPanel date={daily.date} />
             </div>
 
             <div className="grid cols-2" style={{ marginTop: "0.85rem" }}>

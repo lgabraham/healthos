@@ -41,6 +41,15 @@ export const api = {
     }),
   deleteJournal: (id) =>
     fetch(`${BASE}/api/journal/${id}`, { method: "DELETE" }).then((r) => r.json()),
+  updateJournalTags: (id, tags) =>
+    fetch(`${BASE}/api/journal/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tags }),
+    }).then((r) => {
+      if (!r.ok) throw new Error(`journal tags -> ${r.status}`);
+      return r.json();
+    }),
   addWorkout: (workout) =>
     fetch(`${BASE}/api/workouts`, {
       method: "POST",
