@@ -22,9 +22,19 @@ function TagChip({ tag }) {
   );
 }
 
+function todayISO() {
+  return new Date().toLocaleDateString("en-CA");
+}
+function yesterdayISO() {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toLocaleDateString("en-CA");
+}
+
 export default function JournalView() {
   const [entries, setEntries] = useState(null);
   const [text, setText] = useState("");
+  const [logDate, setLogDate] = useState(yesterdayISO()); // default to the day prior
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -44,7 +54,7 @@ export default function JournalView() {
     setBusy(true);
     setError(null);
     try {
-      const created = await api.addJournal(t);
+      const created = await api.addJournal(t, logDate);
       setEntries((prev) => [created, ...(prev || [])]);
       setText("");
     } catch (err) {
@@ -89,7 +99,25 @@ export default function JournalView() {
             boxSizing: "border-box",
           }}
         />
-        <div style={{ display: "flex", alignItems: "center", gap: "0.7rem", marginTop: "0.5rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.7rem", marginTop: "0.5rem", flexWrap: "wrap" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+            <span className="muted mono" style={{ fontSize: "0.7rem" }}>for</span>
+            <input
+              type="date"
+              value={logDate}
+              max={todayISO()}
+              onChange={(e) => setLogDate(e.target.value)}
+              style={{
+                background: "var(--bg)",
+                color: "var(--text)",
+                border: "1px solid var(--border)",
+                borderRadius: 6,
+                padding: "0.3rem 0.45rem",
+                fontFamily: "var(--mono)",
+                fontSize: "0.78rem",
+              }}
+            />
+          </label>
           <button className="refresh" type="submit" disabled={busy || !text.trim()}>
             {busy ? "saving…" : "log it"}
           </button>

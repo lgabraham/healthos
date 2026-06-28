@@ -216,15 +216,25 @@ def sleep_history(
 ) -> list[dict]:
     """One sleep session per day over the window, preferring the canonical source
     (Eight Sleep) and falling back to whatever else reported — e.g. Whoop while
-    traveling without the pod — so the streak grid stays filled on the road."""
-    today = _date.today()
-    out: list[dict] = []
-    for i in range(days):
-        s = best_available_sleep(db, today - timedelta(days=i))
-        if s is not None:
-            out.append(_sleep_dict(s))
-    out.reverse()  # ascending by date
-    return out
+    traveling without the pod — so the streak grid stays filled on the road.
+
+    Fetched in a single query, then reduced to one-per-day in memory (canonical
+    first, else the most recently written), to avoid an N+1 round-trip storm
+    against the remote DB."""
+    since = _date.today() - timedelta(days=days)
+    rows = db.scalars(
+        select(SleepSession)
+        .where(SleepSession.date >= since)
+        .order_by(SleepSession.date.asc(), SleepSession.created_at.asc())
+    ).all()
+    best: dict = {}
+    for s in rows:
+        cur = best.get(s.date)
+        # Canonical (Eight Sleep) wins; otherwise the most recent row — rows are
+        # ordered by created_at asc, so a later non-canonical row replaces.
+        if cur is None or s.is_canonical or not cur.is_canonical:
+            best[s.date] = s
+    return [_sleep_dict(best[d]) for d in sorted(best)]
 
 
 @router.get("/workouts")
