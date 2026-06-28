@@ -103,13 +103,59 @@ function HeroSleep({ sleep }) {
   );
 }
 
+// The day's context from the input side: your latest logged food / meds /
+// supplements, so cause sits next to effect on the Pulse page.
+function RecentIntake({ entries }) {
+  const recent = (entries || []).slice(0, 4);
+  return (
+    <div className="grid" style={{ marginTop: "0.85rem" }}>
+      <div className="panel">
+        <div className="label">Recent intake</div>
+        {entries == null ? (
+          <div className="metric-sub" style={{ marginTop: "0.35rem" }}>loading…</div>
+        ) : recent.length === 0 ? (
+          <div className="metric-sub" style={{ marginTop: "0.35rem" }}>
+            nothing logged recently — add it on the Journal tab.
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.45rem", marginTop: "0.45rem" }}>
+            {recent.map((e) => (
+              <div
+                key={e.id}
+                style={{ display: "flex", justifyContent: "space-between", gap: "0.7rem", alignItems: "center", flexWrap: "wrap" }}
+              >
+                <span className="mono" style={{ fontSize: "0.8rem" }}>
+                  <span className="muted" style={{ fontSize: "0.68rem", marginRight: "0.5rem" }}>{e.date}</span>
+                  {e.text}
+                </span>
+                <span style={{ display: "flex", gap: "0.3rem", flexWrap: "wrap" }}>
+                  {(e.tags || []).map((t) => (
+                    <span
+                      key={t}
+                      className="mono"
+                      style={{ fontSize: "0.62rem", background: "#16302e", color: "#2dd4bf", borderRadius: 4, padding: "1px 5px" }}
+                    >
+                      {t}
+                    </span>
+                  ))}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function DailyView() {
-  const [date, setDate] = useState(todayISO()); // land on today; "latest" button -> null
+  const [date, setDate] = useState(null); // null = latest complete day (Pulse default)
   const [showAll, setShowAll] = useState(false);
   const { data: daily, loading, error } = useHealthData(() => api.daily(date), [date]);
   const { data: hrvTrend } = useHealthData(() => api.trend("hrv_rmssd", 30, 7), []);
   const { data: rhrTrend } = useHealthData(() => api.trend("resting_hr", 30, 7), []);
   const { data: status } = useHealthData(() => api.status(), []);
+  const { data: journal } = useHealthData(() => api.journal(7), []);
 
   const today = todayISO();
   const atToday = daily && daily.date >= today;
@@ -194,6 +240,16 @@ export default function DailyView() {
           />
           <HeroSleep sleep={daily.sleep} />
         </div>
+
+        {/* Inflammation-relevant vitals — elevated resp rate / skin temp + low
+            HRV is the wearable signature of an inflammatory flare. */}
+        <div className="grid cols-3" style={{ marginTop: "0.85rem" }}>
+          <MetricStat label="Respiratory rate" metric={m.respiratory_rate} unit="br/min" digits={1} neutral />
+          <MetricStat label="Skin temp" metric={m.skin_temp} unit="°C" digits={1} neutral />
+          <MetricStat label="SpO₂" metric={m.spo2} unit="%" neutral />
+        </div>
+
+        <RecentIntake entries={journal} />
 
         <button className="section-toggle" onClick={() => setShowAll((s) => !s)}>
           {showAll ? "▾ hide full breakdown" : "▸ full breakdown"}

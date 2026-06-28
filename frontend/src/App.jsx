@@ -8,7 +8,7 @@ import StreaksView from "./views/StreaksView.jsx";
 import JournalView from "./views/JournalView.jsx";
 
 const VIEWS = {
-  daily: { label: "Daily", component: DailyView },
+  pulse: { label: "Pulse", component: DailyView },
   streak: { label: "Streak", component: StreaksView },
   trends: { label: "Trends", component: TrendsView },
   workouts: { label: "Workouts", component: WorkoutsView },
@@ -70,7 +70,8 @@ function RefreshButton() {
 function viewFromHash() {
   const h = window.location.hash.replace("#", "");
   if (h === "sleep") return "streak"; // sleep was folded into the streak tab
-  return h in VIEWS ? h : "daily";
+  if (h === "daily") return "pulse"; // Daily was renamed to Pulse
+  return h in VIEWS ? h : "pulse";
 }
 
 export default function App() {

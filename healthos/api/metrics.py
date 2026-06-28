@@ -44,6 +44,10 @@ DAILY_METRICS = {
     "strain_score": "score",
     "sleep_duration_minutes": "minutes",
     "steps": "steps",
+    # Inflammation-relevant vitals surfaced on Pulse.
+    "respiratory_rate": "br/min",
+    "skin_temp": "°C",
+    "spo2": "%",
 }
 
 
