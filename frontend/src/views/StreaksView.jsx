@@ -24,6 +24,7 @@ function SectionHeading({ children }) {
 export default function StreaksView() {
   return (
     <div
+      className="streaks"
       style={{
         display: "grid",
         gridTemplateColumns: "repeat(auto-fit, minmax(440px, 1fr))",

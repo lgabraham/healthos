@@ -461,6 +461,21 @@ body {
   font-size: 0.62rem;
   margin-top: 0.15rem;
 }
+/* Streak tab: two side-by-side columns make the hero panels narrow, so scale
+   them down (smaller numbers, tighter height) for a cleaner fit. Daily keeps
+   the full-size heroes. */
+.streaks .hero {
+  min-height: 132px;
+}
+.streaks .hero .metric-value.xl {
+  font-size: 2.1rem;
+}
+.streaks .panel .label {
+  font-size: 0.64rem;
+}
+.streaks .metric-sub {
+  font-size: 0.68rem;
+}
 .section-toggle {
   display: inline-block;
   margin: 1rem 0 0.2rem;
