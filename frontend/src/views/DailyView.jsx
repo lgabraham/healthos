@@ -148,6 +148,47 @@ function RecentIntake({ entries }) {
   );
 }
 
+// The inflammation-linked vitals summarized against your own baseline.
+// Descriptive, not diagnostic: elevated respiratory rate / skin temp / resting
+// HR with suppressed HRV is the wearable pattern worth watching during a flare.
+const INFLAMMATION_MARKERS = [
+  { key: "respiratory_rate", label: "resp rate", bad: "up", thresh: 5 },
+  { key: "skin_temp", label: "skin temp", bad: "up", thresh: 1.5 },
+  { key: "resting_hr", label: "resting HR", bad: "up", thresh: 5 },
+  { key: "hrv_rmssd", label: "HRV", bad: "down", thresh: 7 },
+];
+
+function InflammationRead({ m }) {
+  const evald = INFLAMMATION_MARKERS.map((mk) => {
+    const metric = m[mk.key];
+    const d = metric?.delta_pct;
+    if (metric?.value == null || d == null) return { ...mk, status: "na", d: null };
+    const elevated = mk.bad === "up" ? d >= mk.thresh : d <= -mk.thresh;
+    return { ...mk, status: elevated ? "elevated" : "ok", d };
+  });
+  const avail = evald.filter((x) => x.status !== "na");
+  const flagged = avail.filter((x) => x.status === "elevated");
+  const n = flagged.length;
+  const color =
+    avail.length === 0 ? "var(--muted)" : n === 0 ? "var(--good)" : n <= 1 ? "var(--warn)" : "var(--bad)";
+  return (
+    <div className="panel">
+      <div className="label">Inflammation markers</div>
+      <div className="metric-value xl" style={{ color }}>
+        {avail.length === 0 ? "—" : n}
+        {avail.length > 0 && <span className="unit">/ {avail.length} elevated</span>}
+      </div>
+      <div className="metric-sub">
+        {avail.length === 0
+          ? "no data for this day"
+          : n === 0
+            ? "all within your normal range"
+            : flagged.map((x) => `${x.label} ${x.d > 0 ? "+" : ""}${Math.round(x.d)}%`).join(" · ")}
+      </div>
+    </div>
+  );
+}
+
 export default function DailyView() {
   const [date, setDate] = useState(null); // null = latest complete day (Pulse default)
   const [showAll, setShowAll] = useState(false);
@@ -232,8 +273,14 @@ export default function DailyView() {
           </div>
         ) : (
         <>
-        {/* The three headline signals. Everything else lives under the toggle. */}
-        <div className="grid cols-3">
+        {/* Readiness + inflammation — the two headline reads. */}
+        <div className="grid cols-2">
+          <RecoveryScore metric={m.recovery_score} />
+          <InflammationRead m={m} />
+        </div>
+
+        {/* The headline signals. */}
+        <div className="grid cols-3" style={{ marginTop: "0.85rem" }}>
           <HeroMetric
             label="HRV (nocturnal)"
             metric={m.hrv_rmssd}
@@ -249,6 +296,11 @@ export default function DailyView() {
             color="#38bdf8"
           />
           <HeroSleep sleep={daily.sleep} />
+        </div>
+
+        {/* The "why" behind today. */}
+        <div className="grid" style={{ marginTop: "0.85rem" }}>
+          <AttributionPanel date={daily.date} />
         </div>
 
         {/* Inflammation-relevant vitals — elevated resp rate / skin temp + low
@@ -267,14 +319,9 @@ export default function DailyView() {
 
         {showAll && (
           <>
-            <div className="grid cols-3">
-              <RecoveryScore metric={m.recovery_score} />
+            <div className="grid cols-2">
               <MetricStat label="Strain" metric={m.strain_score} digits={1} neutral />
               <MetricStat label="Steps" metric={m.steps} neutral />
-            </div>
-
-            <div className="grid" style={{ marginTop: "0.85rem" }}>
-              <AttributionPanel date={daily.date} />
             </div>
 
             <div className="grid cols-2" style={{ marginTop: "0.85rem" }}>
