@@ -1,6 +1,6 @@
 import { api } from "../api.js";
 import { useHealthData } from "../hooks/useHealthData.js";
-import { useStepGoal } from "../hooks/useStepGoal.js";
+import { useStepGoal, STEP_GOALS } from "../hooks/useStepGoal.js";
 import { useSkipDays, SKIP_DAYS } from "../hooks/useSkipDays.js";
 import { Badge } from "@/components/ui/badge";
 
@@ -104,7 +104,7 @@ function MilestoneStrip({ streak }) {
 }
 
 export default function StreakView() {
-  const [goal] = useStepGoal(); // step goal is tuned on the Workouts tab
+  const [goal, setGoal] = useStepGoal();
   const [skipDays, setSkipDays] = useSkipDays();
   const { data: steps, loading, error } = useHealthData(() => api.trend("steps", 90), []);
   const { data: workouts } = useHealthData(() => api.workouts(90), []);
@@ -133,6 +133,16 @@ export default function StreakView() {
             ? "every weekday must count"
             : `up to ${skipDays} weekday skip${skipDays > 1 ? "s" : ""} in a row is fine`}{" "}
           · weekends are free
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+          <span className="muted" style={{ fontSize: "0.72rem" }}>steps</span>
+          <div className="toggle">
+            {STEP_GOALS.map((g) => (
+              <button key={g} className={goal === g ? "active" : ""} onClick={() => setGoal(g)}>
+                {g / 1000}k
+              </button>
+            ))}
+          </div>
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
           <span className="muted" style={{ fontSize: "0.72rem" }}>skip days</span>
