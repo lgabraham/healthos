@@ -31,6 +31,21 @@ class JournalIn(BaseModel):
     date: str | None = Field(default=None, examples=["2026-06-26"])  # defaults to today (local)
 
 
+class TagsIn(BaseModel):
+    tags: list[str] = Field(default_factory=list, examples=[["alcohol", "fart_walk"]])
+
+
+def _norm_tags(tags: list[str]) -> list[str]:
+    """Normalize manual tags to the same token style as the parser
+    (lowercase, spaces -> underscores), de-duped, blanks dropped."""
+    out: list[str] = []
+    for t in tags:
+        norm = "_".join((t or "").strip().lower().split())
+        if norm and norm not in out:
+            out.append(norm)
+    return out
+
+
 def _intake_dict(e: IntakeLog) -> dict:
     return {
         "id": str(e.id),
@@ -66,6 +81,22 @@ def list_entries(
         select(IntakeLog).where(IntakeLog.date >= since).order_by(IntakeLog.created_at.desc())
     ).all()
     return [_intake_dict(e) for e in rows]
+
+
+@router.patch("/{entry_id}")
+def update_tags(entry_id: str, payload: TagsIn, db: Session = Depends(db_session)) -> dict:
+    """Replace an entry's tags (manual add/remove on top of the auto-parse)."""
+    try:
+        eid = _uuid.UUID(entry_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Bad id.") from exc
+    entry = db.get(IntakeLog, eid)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="No such entry.")
+    entry.tags = _norm_tags(payload.tags)
+    db.commit()
+    db.refresh(entry)
+    return _intake_dict(entry)
 
 
 @router.delete("/{entry_id}")

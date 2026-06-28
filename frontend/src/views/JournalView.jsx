@@ -37,6 +37,8 @@ export default function JournalView() {
   const [logDate, setLogDate] = useState(yesterdayISO()); // default to the day prior
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [addingFor, setAddingFor] = useState(null); // entry id whose add-tag input is open
+  const [newTag, setNewTag] = useState("");
 
   const load = () =>
     api
@@ -67,6 +69,20 @@ export default function JournalView() {
   const remove = async (id) => {
     setEntries((prev) => (prev || []).filter((x) => x.id !== id));
     await api.deleteJournal(id).catch(() => load());
+  };
+
+  const persistTags = async (entry, tags) => {
+    setEntries((prev) => (prev || []).map((x) => (x.id === entry.id ? { ...x, tags } : x)));
+    await api.updateJournalTags(entry.id, tags).catch(() => load());
+  };
+  const removeTag = (entry, tag) =>
+    persistTags(entry, (entry.tags || []).filter((t) => t !== tag));
+  const addTag = (entry, raw) => {
+    const norm = (raw || "").trim().toLowerCase().replace(/\s+/g, "_");
+    setAddingFor(null);
+    setNewTag("");
+    if (!norm || (entry.tags || []).includes(norm)) return;
+    persistTags(entry, [...(entry.tags || []), norm]);
   };
 
   return (
@@ -178,12 +194,57 @@ export default function JournalView() {
                     {e.date}
                   </span>
                   {(e.tags || []).map((t) => (
-                    <TagChip key={t} tag={t} />
-                  ))}
-                  {(e.tags || []).length === 0 && (
-                    <span className="muted mono" style={{ fontSize: "0.68rem" }}>
-                      no tags matched
+                    <span
+                      key={t}
+                      className="mono"
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "0.2rem",
+                        fontSize: "0.62rem",
+                        background: "#16302e",
+                        color: "#2dd4bf",
+                        borderRadius: 4,
+                        padding: "1px 4px 1px 6px",
+                      }}
+                    >
+                      {t}
+                      <button
+                        onClick={() => removeTag(e, t)}
+                        title="remove tag"
+                        style={{ background: "none", border: "none", cursor: "pointer", color: "#2dd4bf", fontSize: "0.8rem", lineHeight: 1, padding: 0 }}
+                      >
+                        ×
+                      </button>
                     </span>
+                  ))}
+                  {addingFor === e.id ? (
+                    <input
+                      autoFocus
+                      value={newTag}
+                      onChange={(ev) => setNewTag(ev.target.value)}
+                      onKeyDown={(ev) => {
+                        if (ev.key === "Enter") addTag(e, newTag);
+                        else if (ev.key === "Escape") {
+                          setAddingFor(null);
+                          setNewTag("");
+                        }
+                      }}
+                      onBlur={() => addTag(e, newTag)}
+                      placeholder="tag…"
+                      style={{ width: "5.5rem", background: "var(--bg)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 4, padding: "1px 5px", fontFamily: "var(--mono)", fontSize: "0.62rem" }}
+                    />
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setAddingFor(e.id);
+                        setNewTag("");
+                      }}
+                      title="add tag"
+                      style={{ background: "none", border: "1px dashed var(--border)", cursor: "pointer", color: "var(--muted)", fontSize: "0.62rem", borderRadius: 4, padding: "1px 6px", fontFamily: "var(--mono)" }}
+                    >
+                      + tag
+                    </button>
                   )}
                 </div>
               </div>
