@@ -4,6 +4,7 @@ import { useHealthData } from "../hooks/useHealthData.js";
 import RecoveryScore from "../components/RecoveryScore.jsx";
 import MetricStat from "../components/MetricStat.jsx";
 import HeroMetric from "../components/HeroMetric.jsx";
+import TrendSnapshot from "../components/TrendSnapshot.jsx";
 import SleepCard from "../components/SleepCard.jsx";
 import EventTimeline from "../components/EventTimeline.jsx";
 import CalendarStrip from "../components/CalendarStrip.jsx";
@@ -291,6 +292,13 @@ export default function DailyView() {
             color="#38bdf8"
           />
           <HeroSleep sleep={daily.sleep} />
+        </div>
+
+        {/* HR + HRV trend snapshot: where the two cardiac signals are heading
+            over the last 30 days (7d rolling vs the prior baseline). */}
+        <div className="grid cols-2" style={{ marginTop: "0.85rem" }}>
+          <TrendSnapshot label="HRV trend" trend={hrvTrend} unit="ms" betterWhen="up" color="#f59e0b" />
+          <TrendSnapshot label="Resting HR trend" trend={rhrTrend} unit="bpm" betterWhen="down" color="#38bdf8" />
         </div>
 
         {/* Inflammation: a one-line read summarizing the relevant vitals below.
