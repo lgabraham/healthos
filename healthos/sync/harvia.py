@@ -131,17 +131,34 @@ class HarviaClient:
         return self._id_token or self.login()
 
     # -- graphql -----------------------------------------------------------
-    def _graphql(self, service: str, query: str, variables: dict | None = None) -> dict:
+    def _graphql(
+        self, service: str, query: str, variables: dict | None = None, _retry: bool = True
+    ) -> dict:
+        """Run an AppSync query, re-authenticating once on an expired token.
+
+        Cognito IdTokens expire after ~1 hour. Without this, the always-on
+        sauna monitor would cache its first token forever and go permanently
+        deaf ~1h after start — silently missing every session (there's no
+        history API to recover them). On a 401/403 or an auth-typed GraphQL
+        error we drop the cached token, re-login via SRP, and retry once.
+        """
         url = self.discover()[service]["endpoint"]
         resp = self._client.post(
             url,
             json={"query": query, "variables": variables or {}},
             headers={"authorization": self._token()},
         )
+        if resp.status_code in (401, 403) and _retry:
+            self._id_token = None  # force a fresh SRP login on the retry
+            return self._graphql(service, query, variables, _retry=False)
         resp.raise_for_status()
         body = resp.json()
-        if body.get("errors"):
-            raise HarviaAuthError(f"Harvia GraphQL error ({service}): {body['errors']}")
+        errors = body.get("errors")
+        if errors:
+            if _retry and _is_auth_error(errors):
+                self._id_token = None
+                return self._graphql(service, query, variables, _retry=False)
+            raise HarviaAuthError(f"Harvia GraphQL error ({service}): {errors}")
         return body.get("data") or {}
 
     def device_tree(self) -> dict:
@@ -185,6 +202,28 @@ class HarviaClient:
 
     def close(self) -> None:
         self._client.close()
+
+
+def _is_auth_error(errors: list) -> bool:
+    """True if an AppSync GraphQL error list looks like an expired/invalid token.
+
+    Token expiry is normally surfaced as an HTTP 401 (handled separately); this
+    covers the setups that instead return it in the 200 body as an
+    ``UnauthorizedException`` errorType or a token/expired message. We match on
+    those specifically — NOT on a bare "Unauthorized" message — because a
+    resolver-level denial (e.g. querying the account's GROUP node) returns a
+    plain "Unauthorized" that is permanent and must be skipped, not retried.
+    """
+    for err in errors or []:
+        if not isinstance(err, dict):
+            continue
+        etype = str(err.get("errorType", "")).lower()
+        msg = str(err.get("message", "")).lower()
+        if "unauthorized" in etype or "token" in etype:
+            return True
+        if "token" in msg or "expired" in msg:
+            return True
+    return False
 
 
 # UUID-ish device id, e.g. as it appears in the getDeviceTree blob.

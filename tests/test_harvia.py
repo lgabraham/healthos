@@ -89,6 +89,57 @@ def test_graphql_raises_on_errors():
         _client_with(handler).device_tree()
 
 
+def test_graphql_reauths_on_expired_token_401():
+    """An expired IdToken (401) triggers one re-login + retry, then succeeds —
+    so the always-on monitor recovers instead of going deaf after ~1h."""
+    calls = {"gql": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url.endswith("/endpoint"):
+            return httpx.Response(200, json=_discovery_response(url.split("/")[-2]))
+        calls["gql"] += 1
+        if calls["gql"] == 1:  # first call: token expired
+            return httpx.Response(401, json={"message": "The incoming token has expired"})
+        assert request.headers.get("authorization") == "fresh-token"
+        return httpx.Response(200, json={"data": {"getDeviceTree": "{}"}})
+
+    c = _client_with(handler)
+    c.login = lambda: setattr(c, "_id_token", "fresh-token") or "fresh-token"
+    out = c.device_tree()
+    assert out == {"getDeviceTree": "{}"}
+    assert calls["gql"] == 2  # retried exactly once
+
+
+def test_graphql_reauths_on_unauthorized_graphql_error():
+    calls = {"gql": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        url = str(request.url)
+        if url.endswith("/endpoint"):
+            return httpx.Response(200, json=_discovery_response(url.split("/")[-2]))
+        calls["gql"] += 1
+        if calls["gql"] == 1:
+            return httpx.Response(200, json={"errors": [{"errorType": "UnauthorizedException",
+                                                         "message": "Token expired"}]})
+        return httpx.Response(200, json={"data": {"getDeviceTree": "{}"}})
+
+    c = _client_with(handler)
+    c.login = lambda: setattr(c, "_id_token", "fresh-token") or "fresh-token"
+    assert c.device_tree() == {"getDeviceTree": "{}"}
+    assert calls["gql"] == 2
+
+
+def test_is_auth_error_discriminates():
+    assert harvia._is_auth_error([{"errorType": "UnauthorizedException"}]) is True
+    assert harvia._is_auth_error([{"message": "The incoming token has expired"}]) is True
+    assert harvia._is_auth_error([{"message": "field 'foo' not found"}]) is False
+    # A bare resolver-level "Unauthorized" (the GROUP node) must NOT trigger a
+    # re-login — it's permanent, and re-auth would break device identification.
+    assert harvia._is_auth_error([{"message": "Unauthorized"}]) is False
+    assert harvia._is_auth_error([]) is False
+
+
 def test_device_ids_extracts_uuids_from_json_string():
     tree = {"getDeviceTree": json.dumps({"group": [
         {"id": "11111111-2222-3333-4444-555555555555"},

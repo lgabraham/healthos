@@ -135,6 +135,8 @@ def test_alcohol_fires_on_2of3_when_calendar_corroborates(session):
 
 
 def test_mcp_query_raw_redacts_titles(session):
+    import json
+
     upsert_calendar_events(
         session,
         [CalendarEventRecord(date=date(2026, 6, 1), uid="x", title="Therapy", location="Clinic")],
@@ -143,15 +145,41 @@ def test_mcp_query_raw_redacts_titles(session):
 
     from healthos.mcp_server.server import query_raw
 
-    out = query_raw("SELECT date, title, location, keywords FROM calendar_events")
+    # SELECT * still returns rows, with title/location redacted by column name.
+    out = query_raw("SELECT * FROM calendar_events")
     assert out["row_count"] == 1
     row = out["rows"][0]
     assert row["title"] == "[redacted]"
     assert row["location"] == "[redacted]"
-    # Confirm the real title is nowhere in the payload.
-    import json
-
     assert "Therapy" not in json.dumps(out)
+
+    # Naming the sensitive column directly (incl. via alias/expression, which
+    # used to defeat output-name redaction) is rejected outright.
+    for q in (
+        "SELECT title FROM calendar_events",
+        "SELECT title AS t FROM calendar_events",
+        "SELECT title || '' FROM calendar_events",
+    ):
+        assert "error" in query_raw(q)
+        assert "Therapy" not in json.dumps(query_raw(q))
+
+
+def test_mcp_query_raw_blocks_writes_and_secrets(session):
+    """The read-only sandbox rejects data-modifying CTEs, secret tables, and
+    server-side functions — not just bare write keywords."""
+    from healthos.mcp_server.server import query_raw
+
+    cte = ("WITH t AS (INSERT INTO daily_events(date,event_type,confidence) "
+           "VALUES('2026-07-01','x','manual') RETURNING id) SELECT * FROM t")
+    assert "error" in query_raw(cte)
+    assert query_raw("SELECT count(*) FROM daily_events WHERE event_type='x'")["rows"][0]
+
+    assert "error" in query_raw("SELECT access_token FROM oauth_tokens")
+    assert "error" in query_raw("SELECT * FROM oauth_tokens")
+    assert "error" in query_raw("SELECT pg_sleep(5)")
+    assert "error" in query_raw("SELECT pg_read_file('/etc/hostname')")
+    # A legitimate read still works.
+    assert query_raw("SELECT 1 AS n")["rows"] == [{"n": 1}]
 
 
 def test_calendar_event_persists(session):

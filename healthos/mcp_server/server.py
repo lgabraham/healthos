@@ -8,6 +8,7 @@ caveat appropriately.
 
 from __future__ import annotations
 
+import re
 from datetime import date as _date
 from datetime import timedelta
 
@@ -16,7 +17,7 @@ from sqlalchemy import select, text
 
 from ..config import settings
 from ..correlate import correlate_metrics
-from ..database import get_session
+from ..database import engine, get_session
 from ..models import DailyEvent, SleepSession, Workout
 from ..queries import (
     MIN_BASELINE_DAYS,
@@ -27,13 +28,15 @@ from ..queries import (
 )
 
 INSTRUCTIONS = (
-    "HealthOS contains personal health data. Canonical sources are: Whoop for "
-    "HRV/sleep/recovery, Garmin for exercise/training, Eight Sleep for sleep "
-    "environment. Behavioral events may be inferred (lower confidence) or "
-    "confirmed. Calendar context is available as keywords/flags only — event "
-    "titles and locations are intentionally redacted and never exposed here. "
-    "When answering trend questions, always note sample size and flag if the "
-    "baseline is < 30 days."
+    "HealthOS contains personal health data. Canonical sources are: Eight Sleep "
+    "for nightly HRV / resting HR / sleep duration & staging and the sleep "
+    "environment (bed/skin/room temp), Whoop for its proprietary recovery and "
+    "strain scores, Garmin for exercise HR / training load / steps / workouts. "
+    "When the canonical device has a gap, a labeled fallback source fills in. "
+    "Behavioral events may be inferred (lower confidence) or confirmed. Calendar "
+    "context is available as keywords/flags only — event titles and locations "
+    "are intentionally redacted and never exposed here. When answering trend "
+    "questions, always note sample size and flag if the baseline is < 30 days."
 )
 
 # Columns whose values are redacted in query_raw output (privacy: calendar
@@ -187,12 +190,35 @@ def correlate(metric_a: str, metric_b: str, days: int = 90, lag_days: int = 0) -
         return correlate_metrics(s, metric_a, metric_b, days, lag_days=lag_days).to_dict()
 
 
+# Identifiers query_raw refuses to touch, matched as whole words (case-insensitive).
+# This is defense-in-depth on top of the read-only transaction below:
+#  - oauth_tokens / access_token / refresh_token: never expose live OAuth secrets
+#    to the model (a plain table allowlist by another name).
+#  - title / location: calendar event text is redacted, and keying redaction off
+#    the *output* column name is trivially defeated by an alias
+#    (`SELECT title AS t`) or expression — so we reject any query that names the
+#    sensitive source columns at all. `SELECT *` still works and gets its title/
+#    location values redacted below.
+#  - server-side file/sleep functions: belt-and-suspenders with statement_timeout.
+_FORBIDDEN_IDENTIFIERS = (
+    "oauth_tokens", "access_token", "refresh_token",
+    "title", "location",
+    "pg_read_file", "pg_read_binary_file", "pg_ls_dir", "pg_sleep", "lo_import",
+    "lo_export", "copy", "dblink",
+)
+_FORBIDDEN_RE = re.compile(
+    r"\b(" + "|".join(_FORBIDDEN_IDENTIFIERS) + r")\b", re.IGNORECASE
+)
+
+
 @mcp.tool()
 def query_raw(sql: str) -> dict:
     """Escape hatch for complex questions: run a read-only SQL SELECT.
 
-    Only a single SELECT/WITH statement is permitted; any write or multi-
-    statement input is rejected. Results are capped at 500 rows.
+    Only a single SELECT/WITH statement is permitted. The query runs inside a
+    genuinely read-only transaction with a short statement timeout, so writes
+    (including data-modifying CTEs), long-running functions, and access to
+    secret/redacted columns are all rejected. Results are capped at 500 rows.
     """
     cleaned = sql.strip().rstrip(";").strip()
     lowered = cleaned.lower()
@@ -200,28 +226,39 @@ def query_raw(sql: str) -> dict:
         return {"error": "Only a single statement is allowed."}
     if not (lowered.startswith("select") or lowered.startswith("with")):
         return {"error": "Only SELECT/WITH queries are allowed."}
-    forbidden = ("insert", "update", "delete", "drop", "alter", "truncate", "create", "grant")
-    if any(f in lowered.split() for f in forbidden):
-        return {"error": "Write keywords are not allowed."}
-    with get_session() as s:
-        result = s.execute(text(cleaned))
-        cols = list(result.keys())
-        rows = [dict(zip(cols, r)) for r in result.fetchmany(500)]
-        # JSON-safe coercion for dates/decimals; redact sensitive columns.
-        for row in rows:
-            for k, v in row.items():
-                if k in REDACTED_COLUMNS:
-                    row[k] = "[redacted]" if v is not None else None
-                elif hasattr(v, "isoformat"):
-                    row[k] = v.isoformat()
-                elif isinstance(v, (bytes, bytearray)):
-                    row[k] = v.decode("utf-8", "replace")
-                else:
-                    try:
-                        row[k] = float(v) if v is not None and not isinstance(v, (str, bool, int)) else v
-                    except (TypeError, ValueError):
-                        row[k] = str(v)
-        return {"columns": cols, "row_count": len(rows), "rows": rows}
+    match = _FORBIDDEN_RE.search(cleaned)
+    if match:
+        return {"error": f"Access to '{match.group(1)}' is not permitted."}
+
+    try:
+        # A read-only transaction is the real guard: Postgres rejects any
+        # INSERT/UPDATE/DELETE (even inside a CTE) with "cannot execute ... in a
+        # read-only transaction", and statement_timeout caps runaway queries.
+        # SET LOCAL scopes both to this transaction, so nothing leaks back to the
+        # pooled connection.
+        with engine.begin() as conn:
+            conn.execute(text("SET LOCAL transaction_read_only = on"))
+            conn.execute(text("SET LOCAL statement_timeout = '5000'"))
+            result = conn.execute(text(cleaned))
+            cols = list(result.keys())
+            rows = [dict(zip(cols, r)) for r in result.fetchmany(500)]
+    except Exception as exc:  # noqa: BLE001 - surface as a tool error, not a crash
+        return {"error": f"Query rejected: {str(exc).splitlines()[0][:200]}"}
+
+    for row in rows:
+        for k, v in row.items():
+            if k in REDACTED_COLUMNS:
+                row[k] = "[redacted]" if v is not None else None
+            elif hasattr(v, "isoformat"):
+                row[k] = v.isoformat()
+            elif isinstance(v, (bytes, bytearray)):
+                row[k] = v.decode("utf-8", "replace")
+            else:
+                try:
+                    row[k] = float(v) if v is not None and not isinstance(v, (str, bool, int)) else v
+                except (TypeError, ValueError):
+                    row[k] = str(v)
+    return {"columns": cols, "row_count": len(rows), "rows": rows}
 
 
 @mcp.tool()
