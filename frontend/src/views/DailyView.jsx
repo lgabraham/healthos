@@ -4,11 +4,16 @@ import { useHealthData } from "../hooks/useHealthData.js";
 import RecoveryScore from "../components/RecoveryScore.jsx";
 import MetricStat from "../components/MetricStat.jsx";
 import HeroMetric from "../components/HeroMetric.jsx";
+import TrendSnapshot from "../components/TrendSnapshot.jsx";
 import SleepCard from "../components/SleepCard.jsx";
 import EventTimeline from "../components/EventTimeline.jsx";
 import CalendarStrip from "../components/CalendarStrip.jsx";
 import AttributionPanel from "../components/AttributionPanel.jsx";
 import DatePicker from "../components/DatePicker.jsx";
+import { useStepGoal } from "../hooks/useStepGoal.js";
+import { useSkipDays } from "../hooks/useSkipDays.js";
+import { useRhrOffset } from "../hooks/useRhrOffset.js";
+import { activityStreak, sleepStreak } from "../lib/streaks.js";
 import { hm, num } from "../format.js";
 
 function shiftDate(iso, days) {
@@ -159,19 +164,57 @@ const INFLAMMATION_MARKERS = [
   { key: "spo2", label: "SpO₂", bad: "down", thresh: 2 },
 ];
 
-function InflammationRead({ m }) {
+// Why a marker can't be judged: no value synced, a value that came from a
+// fallback/estimated source (delta suppressed), or a value with no baseline to
+// compare against yet. Kept in sync with the delta rules in api/metrics.py.
+const REASON_TEXT = {
+  "no reading": "not synced",
+  baseline: "building baseline",
+  fallback: "fallback source",
+  estimated: "estimated",
+};
+
+function InflammationRead({ m, buildingBaseline }) {
   const evald = INFLAMMATION_MARKERS.map((mk) => {
     const metric = m[mk.key];
+    const value = metric?.value;
     const d = metric?.delta_pct;
-    if (metric?.value == null || d == null) return { ...mk, status: "na", d: null };
+    if (value == null) return { ...mk, status: "na", reason: "no reading", value: null, d: null };
+    if (d == null) {
+      const reason = metric.is_fallback ? "fallback" : metric.is_estimated ? "estimated" : "baseline";
+      return { ...mk, status: "na", reason, value, d: null };
+    }
     const elevated = mk.bad === "up" ? d >= mk.thresh : d <= -mk.thresh;
-    return { ...mk, status: elevated ? "elevated" : "ok", d };
+    return { ...mk, status: elevated ? "elevated" : "ok", value, d };
   });
   const avail = evald.filter((x) => x.status !== "na");
   const flagged = avail.filter((x) => x.status === "elevated");
+  const na = evald.filter((x) => x.status === "na");
   const n = flagged.length;
   const color =
     avail.length === 0 ? "var(--muted)" : n === 0 ? "var(--good)" : n <= 1 ? "var(--warn)" : "var(--bad)";
+
+  // When nothing can be judged, say why rather than a bare "no data".
+  const readings = na.filter((x) => x.value != null);
+  const emptyMsg =
+    readings.length === 0
+      ? "no vitals synced for this day"
+      : buildingBaseline || readings.some((x) => x.reason === "baseline")
+        ? `${readings.length} reading${readings.length > 1 ? "s" : ""} in — building baseline to compare`
+        : readings.some((x) => x.reason === "fallback")
+          ? "on a fallback source — no baseline to compare against"
+          : "not enough baseline yet";
+
+  // Compact "waiting on X (why)" line, grouped by reason, so a blank OR partial
+  // read explains which markers are missing and what they need.
+  const byReason = na.reduce((acc, x) => {
+    (acc[x.reason] = acc[x.reason] || []).push(x.label);
+    return acc;
+  }, {});
+  const waiting = Object.entries(byReason)
+    .map(([reason, labels]) => `${labels.join(", ")} (${REASON_TEXT[reason] || reason})`)
+    .join(" · ");
+
   return (
     <div className="panel">
       <div className="label">Inflammation markers</div>
@@ -181,11 +224,51 @@ function InflammationRead({ m }) {
       </div>
       <div className="metric-sub">
         {avail.length === 0
-          ? "no data for this day"
+          ? emptyMsg
           : n === 0
             ? "all within your normal range"
             : flagged.map((x) => `${x.label} ${x.d > 0 ? "+" : ""}${Math.round(x.d)}%`).join(" · ")}
       </div>
+      {na.length > 0 && (
+        <div className="mono" style={{ fontSize: "0.62rem", color: "var(--muted)", marginTop: "0.35rem" }}>
+          waiting on {waiting}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// A headline streak tile (workout / sleep), mirroring the Streak & Sleep tabs.
+// The streak is a rolling "current" figure, independent of the viewed day.
+function StreakHero({ label, icon, count, longest, unit, loading }) {
+  return (
+    <div className="panel hero">
+      <div className="label">{label}</div>
+      <div className="metric-value xl" style={{ color: count > 0 ? "var(--accent)" : "var(--muted)" }}>
+        {loading ? "…" : `${icon} ${count}`}
+      </div>
+      <div className="metric-sub">
+        {loading ? "loading…" : count > 0 ? `${unit} kept going · best ${longest}` : `start ${unit === "days" ? "today" : "tonight"}`}
+      </div>
+    </div>
+  );
+}
+
+// Uppercase mono section label to group the folded breakdown, matching the
+// Streaks page headings.
+function SectionHeading({ children }) {
+  return (
+    <div
+      style={{
+        fontFamily: "var(--mono)",
+        fontSize: "0.74rem",
+        letterSpacing: "0.08em",
+        textTransform: "uppercase",
+        color: "var(--muted)",
+        margin: "1.1rem 0 0.6rem",
+      }}
+    >
+      {children}
     </div>
   );
 }
@@ -198,6 +281,18 @@ export default function DailyView() {
   const { data: rhrTrend } = useHealthData(() => api.trend("resting_hr", 30, 7), []);
   const { data: status } = useHealthData(() => api.status(), []);
   const { data: journal } = useHealthData(() => api.journal(7), []);
+  // Streak headliners: same inputs the Streak/Sleep tabs use, so the numbers agree.
+  const { data: stepsTrend } = useHealthData(() => api.trend("steps", 90), []);
+  const { data: workoutsHist } = useHealthData(() => api.workouts(90), []);
+  const { data: sleepHist } = useHealthData(() => api.sleep(90), []);
+  const { data: rhrRaw } = useHealthData(() => api.trend("resting_hr", 90, 1), []);
+  const { data: calendar } = useHealthData(() => api.calendar(90), []);
+  const [goal] = useStepGoal();
+  const [skipDays] = useSkipDays();
+  const [rhrOffset] = useRhrOffset();
+
+  const act = activityStreak(stepsTrend?.series, workoutsHist, goal, skipDays);
+  const slp = sleepStreak({ sleep: sleepHist, rhrSeries: rhrRaw?.series, calendar, rhrOffset });
 
   const today = todayISO();
   const atToday = daily && daily.date >= today;
@@ -213,15 +308,10 @@ export default function DailyView() {
     return () => window.removeEventListener("keydown", onKey);
   }, [daily, atToday]);
 
-  // Pulse always lands on data: if the viewed day turns out empty (e.g. you
-  // stepped onto a gap), fall back to the latest complete day. Guarded by
-  // `date !== null` so the latest-day fetch itself never loops.
-  useEffect(() => {
-    if (!daily || date === null) return;
-    const has =
-      Object.values(daily.metrics || {}).some((x) => x && x.value != null) || daily.sleep != null;
-    if (!has) setDate(null);
-  }, [daily, date]);
+  // Note: Pulse defaults to the latest complete day server-side (a null date
+  // fetches it). When you deliberately navigate to an empty day we now SHOW the
+  // "no data" panel (with a "view latest complete day" button) rather than
+  // silently yanking you back — so an empty day can actually be inspected.
 
   if (!daily && loading) return <div className="muted mono">loading…</div>;
   if (error) return <div className="error">error: {error}</div>;
@@ -274,8 +364,9 @@ export default function DailyView() {
           </div>
         ) : (
         <>
-        {/* The headline signals. */}
-        <div className="grid cols-3">
+        {/* Four headline signals: cardiac readiness + the two streaks. Every
+            other metric folds into the breakdown below. */}
+        <div className="grid cols-4">
           <HeroMetric
             label="HRV (nocturnal)"
             metric={m.hrv_rmssd}
@@ -290,21 +381,23 @@ export default function DailyView() {
             trend={trendUpTo(rhrTrend, daily.date)}
             color="#38bdf8"
           />
-          <HeroSleep sleep={daily.sleep} />
+          <StreakHero
+            label="Workout streak"
+            icon="🔥"
+            count={act.streak}
+            longest={act.longest}
+            unit="days"
+            loading={stepsTrend == null}
+          />
+          <StreakHero
+            label="Sleep streak"
+            icon="🌙"
+            count={slp.streak}
+            longest={slp.longest}
+            unit="nights"
+            loading={sleepHist == null}
+          />
         </div>
-
-        {/* Inflammation: a one-line read summarizing the relevant vitals below.
-            Elevated resp rate / skin temp + low HRV is the flare signature. */}
-        <div className="grid" style={{ marginTop: "0.85rem" }}>
-          <InflammationRead m={m} />
-        </div>
-        <div className="grid cols-3" style={{ marginTop: "0.85rem" }}>
-          <MetricStat label="Respiratory rate" metric={m.respiratory_rate} unit="br/min" digits={1} neutral />
-          <MetricStat label="Skin temp" metric={m.skin_temp} unit="°C" digits={1} neutral />
-          <MetricStat label="SpO₂" metric={m.spo2} unit="%" neutral />
-        </div>
-
-        <RecentIntake entries={journal} />
 
         <button className="section-toggle" onClick={() => setShowAll((s) => !s)}>
           {showAll ? "▾ hide full breakdown" : "▸ full breakdown"}
@@ -312,25 +405,38 @@ export default function DailyView() {
 
         {showAll && (
           <>
+            {/* Vitals: the cardiac trend + the inflammation read and its markers. */}
+            <SectionHeading>Vitals</SectionHeading>
+            <div className="grid cols-2">
+              <TrendSnapshot label="HRV trend" trend={hrvTrend} unit="ms" betterWhen="up" color="#f59e0b" />
+              <TrendSnapshot label="Resting HR trend" trend={rhrTrend} unit="bpm" betterWhen="down" color="#38bdf8" />
+            </div>
+            <div className="grid" style={{ marginTop: "0.85rem" }}>
+              <InflammationRead m={m} buildingBaseline={daily.building_baseline} />
+            </div>
+            <div className="grid cols-3" style={{ marginTop: "0.85rem" }}>
+              <MetricStat label="Respiratory rate" metric={m.respiratory_rate} unit="br/min" digits={1} neutral />
+              <MetricStat label="Skin temp" metric={m.skin_temp} unit="°C" digits={1} neutral />
+              <MetricStat label="SpO₂" metric={m.spo2} unit="%" neutral />
+            </div>
+
+            {/* Sleep: last night's duration + stages + the night's events. */}
+            <SectionHeading>Sleep</SectionHeading>
+            <div className="grid cols-2">
+              <HeroSleep sleep={daily.sleep} />
+              <SleepCard sleep={daily.sleep} />
+            </div>
+            <div className="grid" style={{ marginTop: "0.85rem" }}>
+              <EventTimeline events={daily.events} title="Inferred / confirmed events" />
+            </div>
+
+            {/* Recovery & activity. */}
+            <SectionHeading>Recovery &amp; activity</SectionHeading>
             <div className="grid cols-3">
               <RecoveryScore metric={m.recovery_score} />
               <MetricStat label="Strain" metric={m.strain_score} digits={1} neutral />
               <MetricStat label="Steps" metric={m.steps} neutral />
             </div>
-
-            <div className="grid" style={{ marginTop: "0.85rem" }}>
-              <AttributionPanel date={daily.date} />
-            </div>
-
-            <div className="grid cols-2" style={{ marginTop: "0.85rem" }}>
-              <SleepCard sleep={daily.sleep} />
-              <EventTimeline events={daily.events} title="Inferred / confirmed events" />
-            </div>
-
-            <div className="grid" style={{ marginTop: "0.85rem" }}>
-              <CalendarStrip events={daily.calendar} viewDate={daily.date} />
-            </div>
-
             <div className="grid" style={{ marginTop: "0.85rem" }}>
               <div className="panel" style={wkStale ? { opacity: 0.6 } : undefined}>
                 <div className="label">Last workout</div>
@@ -354,6 +460,16 @@ export default function DailyView() {
                   <div className="metric-sub">No recent workout.</div>
                 )}
               </div>
+            </div>
+
+            {/* Day context: what you logged, the attribution, and the calendar. */}
+            <SectionHeading>Day context</SectionHeading>
+            <RecentIntake entries={journal} />
+            <div className="grid" style={{ marginTop: "0.85rem" }}>
+              <AttributionPanel date={daily.date} />
+            </div>
+            <div className="grid" style={{ marginTop: "0.85rem" }}>
+              <CalendarStrip events={daily.calendar} viewDate={daily.date} />
             </div>
           </>
         )}

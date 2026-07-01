@@ -1,7 +1,8 @@
 import { api } from "../api.js";
 import { useHealthData } from "../hooks/useHealthData.js";
-import { useStepGoal } from "../hooks/useStepGoal.js";
+import { useStepGoal, STEP_GOALS } from "../hooks/useStepGoal.js";
 import { useSkipDays, SKIP_DAYS } from "../hooks/useSkipDays.js";
+import { buildActivityDays, computeActivityStreak } from "../lib/streaks.js";
 import { Badge } from "@/components/ui/badge";
 
 // A day "counts" if you worked out OR hit the step goal. Up to `allowedSkips`
@@ -17,51 +18,6 @@ const MARK_COLOR = {
   broken: "#5b1a1a", // 2nd weekday rest in a row — streak broke
   pending: "#1a1a1a", // today, not yet active
 };
-
-function todayISO() {
-  return new Date().toLocaleDateString("en-CA");
-}
-
-function buildDays(stepsSeries, workouts, goal) {
-  const workoutDays = new Set((workouts || []).map((w) => w.date));
-  return (stepsSeries || []).map((d) => {
-    const worked = workoutDays.has(d.date);
-    const hitGoal = d.value != null && d.value >= goal;
-    return { date: d.date, steps: d.value, worked, hitGoal, active: worked || hitGoal };
-  });
-}
-
-function computeStreak(days, allowedSkips) {
-  const today = todayISO();
-  let streak = 0;
-  let longest = 0;
-  let restRun = 0; // consecutive weekday rest days (weekends don't count)
-  for (const d of days) {
-    const dow = new Date(`${d.date}T00:00:00`).getDay();
-    const weekend = dow === 0 || dow === 6;
-    if (d.date === today && !d.active) {
-      d.mark = "pending";
-      continue;
-    }
-    if (d.active) {
-      streak += 1;
-      restRun = 0;
-      d.mark = d.worked ? "workout" : "steps";
-    } else if (weekend) {
-      // Weekends are free: never break, and don't use up an allowed skip.
-      streak += 1;
-      d.mark = "weekend";
-    } else if (++restRun > allowedSkips) {
-      streak = 0;
-      d.mark = "broken";
-    } else {
-      streak += 1;
-      d.mark = "rest";
-    }
-    longest = Math.max(longest, streak);
-  }
-  return { streak, longest };
-}
 
 function markLabel(d) {
   if (d.mark === "workout") return "workout";
@@ -104,7 +60,7 @@ function MilestoneStrip({ streak }) {
 }
 
 export default function StreakView() {
-  const [goal] = useStepGoal(); // step goal is tuned on the Workouts tab
+  const [goal, setGoal] = useStepGoal();
   const [skipDays, setSkipDays] = useSkipDays();
   const { data: steps, loading, error } = useHealthData(() => api.trend("steps", 90), []);
   const { data: workouts } = useHealthData(() => api.workouts(90), []);
@@ -112,8 +68,8 @@ export default function StreakView() {
   if (loading) return <div className="muted mono">loading…</div>;
   if (error) return <div className="error">error: {error}</div>;
 
-  const days = buildDays(steps?.series, workouts, goal);
-  const { streak, longest } = computeStreak(days, skipDays);
+  const days = buildActivityDays(steps?.series, workouts, goal);
+  const { streak, longest } = computeActivityStreak(days, skipDays);
   const weeks = toWeeks(days);
   const last7 = days.slice(-7);
   const activeThisWeek = last7.filter((d) => d.active).length;
@@ -133,6 +89,16 @@ export default function StreakView() {
             ? "every weekday must count"
             : `up to ${skipDays} weekday skip${skipDays > 1 ? "s" : ""} in a row is fine`}{" "}
           · weekends are free
+        </span>
+        <span style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
+          <span className="muted" style={{ fontSize: "0.72rem" }}>steps</span>
+          <div className="toggle">
+            {STEP_GOALS.map((g) => (
+              <button key={g} className={goal === g ? "active" : ""} onClick={() => setGoal(g)}>
+                {g / 1000}k
+              </button>
+            ))}
+          </div>
         </span>
         <span style={{ display: "flex", alignItems: "center", gap: "0.45rem" }}>
           <span className="muted" style={{ fontSize: "0.72rem" }}>skip days</span>

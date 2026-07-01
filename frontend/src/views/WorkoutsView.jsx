@@ -2,7 +2,6 @@ import { useState } from "react";
 import { api } from "../api.js";
 import { useHealthData } from "../hooks/useHealthData.js";
 import { useStepGoal } from "../hooks/useStepGoal.js";
-import StepGoalToggle from "../components/StepGoalToggle.jsx";
 import { Badge } from "@/components/ui/badge";
 import { hm, num } from "../format.js";
 
@@ -58,7 +57,7 @@ function Field({ label, width, children }) {
 const EMPTY_FORM = { sport_type: "", date: todayISO(), duration_minutes: "", distance_km: "", calories: "" };
 
 export default function WorkoutsView() {
-  const [goal, setGoal] = useStepGoal();
+  const [goal] = useStepGoal(); // shared goal; tuned on the Streak tab
   const [reloadKey, setReloadKey] = useState(0);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -173,7 +172,9 @@ export default function WorkoutsView() {
           </div>
           <div className="metric-sub">workout or {goal.toLocaleString()}+ steps</div>
         </div>
-        <StepGoalToggle value={goal} onChange={setGoal} />
+        <div className="metric-sub mono" style={{ fontSize: "0.68rem", color: "var(--muted)" }}>
+          step goal set on the Streak tab
+        </div>
       </div>
 
       <div className="panel" style={{ marginBottom: "0.8rem" }}>

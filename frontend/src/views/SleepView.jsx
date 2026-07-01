@@ -1,6 +1,7 @@
 import { api } from "../api.js";
 import { useHealthData } from "../hooks/useHealthData.js";
 import { useRhrOffset, RHR_OFFSETS } from "../hooks/useRhrOffset.js";
+import { sleepStreak, BEDTIME_WINDOW } from "../lib/streaks.js";
 import { Badge } from "@/components/ui/badge";
 
 // A night "counts" toward the sleep streak if your resting HR came in at/under
@@ -10,7 +11,6 @@ import { Badge } from "@/components/ui/badge";
 // gaps don't hurt. The night before a travel day (a calendar event tagged
 // "travel") is likewise skipped — an early flight or pre-trip packing shouldn't
 // count against the streak.
-const BEDTIME_WINDOW = 60; // minutes around median bedtime that count as "on routine"
 const MILESTONES = [7, 14, 30];
 
 const MARK_COLOR = {
@@ -22,31 +22,6 @@ const MARK_COLOR = {
   pending: "#1a1a1a", // tonight, not recorded yet
 };
 
-function todayISO() {
-  return new Date().toLocaleDateString("en-CA");
-}
-
-function shiftDate(iso, days) {
-  const d = new Date(`${iso}T00:00:00`);
-  d.setDate(d.getDate() + days);
-  return d.toLocaleDateString("en-CA");
-}
-
-// Whole-word travel match, derived from the event text rather than the stored
-// keywords (which historically used substring matching and mis-tagged words
-// like "department" → travel). "departure"/"departing" count; "department" does
-// not. A travel day's *prior* night is the one skipped.
-const TRAVEL_RE = /\b(flights?|airport|layover|depart(?:ure|ing)?|trips?)\b/i;
-
-// Wall-clock minutes relative to noon: evening bedtimes land ~540–840, morning
-// wakes ~1080–1140, so a normal night is monotonic and never wraps midnight.
-// Parses the HH:MM straight out of the local ISO string (no tz math needed).
-function minutesFromNoon(iso) {
-  const m = (iso || "").match(/T(\d{2}):(\d{2})/);
-  if (!m) return null;
-  return ((+m[1] * 60 + +m[2]) - 720 + 1440) % 1440;
-}
-
 function fmtClock(mfn) {
   if (mfn == null) return "—";
   // Round to whole minutes (a median can land on a half-minute -> "9:53.5pm").
@@ -56,78 +31,6 @@ function fmtClock(mfn) {
   const ap = h < 12 ? "am" : "pm";
   h = h % 12 || 12;
   return `${h}:${String(min).padStart(2, "0")}${ap}`;
-}
-
-function median(arr) {
-  if (!arr.length) return null;
-  const s = [...arr].sort((a, b) => a - b);
-  const m = Math.floor(s.length / 2);
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-}
-
-// Mean absolute deviation around the median — a robust "± how much it wanders".
-function spread(arr, med) {
-  if (!arr.length || med == null) return null;
-  return arr.reduce((a, v) => a + Math.abs(v - med), 0) / arr.length;
-}
-
-function buildNights(sleep, rhrSeries, rhrTarget, medBed, days = 90) {
-  const rhrByDate = {};
-  for (const d of rhrSeries || []) if (d.value != null) rhrByDate[d.date] = d.value;
-  const sleepByDate = {};
-  for (const s of sleep || []) sleepByDate[s.date] = s;
-  // One entry per calendar day for the last `days` (ending today), so nights
-  // with no recorded sleep render as real "no data" gaps and the weekday columns
-  // stay aligned — the grid always lands on today.
-  const out = [];
-  const end = todayISO();
-  for (let day = shiftDate(end, -(days - 1)); day <= end; day = shiftDate(day, 1)) {
-    const s = sleepByDate[day];
-    if (!s) {
-      out.push({ date: day }); // no sleep recorded -> "no data" / "pending" (today)
-      continue;
-    }
-    const bed = minutesFromNoon(s.start_time);
-    const onRoutine = bed != null && medBed != null && Math.abs(bed - medBed) <= BEDTIME_WINDOW;
-    const rhr = rhrByDate[day] ?? null;
-    const recovered = rhr != null && rhrTarget != null && rhr <= rhrTarget;
-    out.push({ date: day, bed, wake: minutesFromNoon(s.end_time), rhr, onRoutine, recovered });
-  }
-  return out;
-}
-
-function computeStreak(nights, haveSleepByDate, travelDays) {
-  // Walk every calendar day in range so a night with no sleep is a true gap.
-  const today = todayISO();
-  let streak = 0;
-  let longest = 0;
-  for (const n of nights) {
-    if (n.date === today && !haveSleepByDate.has(n.date)) {
-      n.mark = "pending";
-      continue;
-    }
-    if (!haveSleepByDate.has(n.date)) {
-      n.mark = "nodata";
-      continue;
-    }
-    if (travelDays.has(n.date)) {
-      // Night before a travel day: a free pass — neither extends nor breaks.
-      n.mark = "travel";
-      continue;
-    }
-    if (n.recovered) {
-      streak += 1;
-      n.mark = "recovered";
-    } else if (n.onRoutine) {
-      streak += 1;
-      n.mark = "routine";
-    } else {
-      streak = 0;
-      n.mark = "miss";
-    }
-    longest = Math.max(longest, streak);
-  }
-  return { streak, longest };
 }
 
 function markLabel(n) {
@@ -181,34 +84,10 @@ export default function SleepView() {
   if (loading) return <div className="muted mono">loading…</div>;
   if (error) return <div className="error">error: {error}</div>;
 
-  // Regularity over the recent window (last 30 nights), which is what you can
-  // actually act on; older data is sparse.
-  const recent = (sleep || []).slice(-30);
-  const bedtimes = recent.map((s) => minutesFromNoon(s.start_time)).filter((v) => v != null);
-  const waketimes = recent.map((s) => minutesFromNoon(s.end_time)).filter((v) => v != null);
-  const medBed = median(bedtimes);
-  const medWake = median(waketimes);
-  const bedSpread = spread(bedtimes, medBed);
-  const wakeSpread = spread(waketimes, medWake);
-
-  // Personalized RHR target: your median resting HR, shifted by the chosen
-  // difficulty offset. Nights at or below it "count" even if bedtime drifted.
-  const rhrVals = (rhr?.series || []).map((d) => d.value).filter((v) => v != null);
-  const rhrMedian = rhrVals.length ? Math.round(median(rhrVals)) : null;
-  const rhrTarget = rhrMedian == null ? null : rhrMedian + rhrOffset;
-
-  const haveSleep = new Set((sleep || []).map((s) => s.date));
-  // A "travel day" is any calendar date with a flight/airport/trip event (matched
-  // whole-word from the event text — see TRAVEL_RE). HealthOS dates a night by the
-  // morning it ends, so the night dated that day is the one right before you set
-  // out — that's the night skipped.
-  const travelDays = new Set(
-    (calendar || [])
-      .filter((c) => TRAVEL_RE.test(`${c.title || ""} ${c.location || ""}`))
-      .map((c) => c.date)
-  );
-  const nights = buildNights(sleep, rhr?.series, rhrTarget, medBed);
-  const { streak, longest } = computeStreak(nights, haveSleep, travelDays);
+  // All streak logic (median bedtime, RHR target, travel skips, per-night marks)
+  // lives in the shared lib so the Sleep tab and the Pulse headliner agree.
+  const { streak, longest, nights, haveSleep, medBed, medWake, bedSpread, wakeSpread, rhrMedian, rhrTarget } =
+    sleepStreak({ sleep, rhrSeries: rhr?.series, calendar, rhrOffset });
   const weeks = toWeeks(nights);
   // Skipped nights (travel) are excluded from the weekly "kept" ratio so they
   // neither help nor hurt it.

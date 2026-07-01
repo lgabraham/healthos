@@ -82,7 +82,8 @@ class Settings(BaseSettings):
 
     # App ------------------------------------------------------------------
     timezone: str = Field(default="America/Los_Angeles", alias="TIMEZONE")
-    sync_hour: int = Field(default=6, alias="SYNC_HOUR")
+    sync_hour: int = Field(default=7, alias="SYNC_HOUR")
+    sync_minute: int = Field(default=30, alias="SYNC_MINUTE")
     port: int = Field(default=8000, alias="PORT")
     cors_origins: str = Field(default="http://localhost:5173", alias="CORS_ORIGINS")
     # Calendar: comma-separated secret .ics URLs (read-only iCal links).

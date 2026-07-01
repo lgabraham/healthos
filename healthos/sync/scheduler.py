@@ -28,7 +28,7 @@ def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone=settings.timezone)
     scheduler.add_job(
         _safe_daily_sync,
-        CronTrigger(hour=settings.sync_hour, minute=0, timezone=settings.timezone),
+        CronTrigger(hour=settings.sync_hour, minute=settings.sync_minute, timezone=settings.timezone),
         id="nightly_sync",
         name="HealthOS nightly sync",
         replace_existing=True,
@@ -37,7 +37,12 @@ def start_scheduler() -> BackgroundScheduler:
     )
     scheduler.start()
     _scheduler = scheduler
-    log.info("Scheduler started; nightly sync at %02d:00 %s", settings.sync_hour, settings.timezone)
+    log.info(
+        "Scheduler started; nightly sync at %02d:%02d %s",
+        settings.sync_hour,
+        settings.sync_minute,
+        settings.timezone,
+    )
     return scheduler
 
 
