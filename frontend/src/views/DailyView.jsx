@@ -164,19 +164,57 @@ const INFLAMMATION_MARKERS = [
   { key: "spo2", label: "SpO₂", bad: "down", thresh: 2 },
 ];
 
-function InflammationRead({ m }) {
+// Why a marker can't be judged: no value synced, a value that came from a
+// fallback/estimated source (delta suppressed), or a value with no baseline to
+// compare against yet. Kept in sync with the delta rules in api/metrics.py.
+const REASON_TEXT = {
+  "no reading": "not synced",
+  baseline: "building baseline",
+  fallback: "fallback source",
+  estimated: "estimated",
+};
+
+function InflammationRead({ m, buildingBaseline }) {
   const evald = INFLAMMATION_MARKERS.map((mk) => {
     const metric = m[mk.key];
+    const value = metric?.value;
     const d = metric?.delta_pct;
-    if (metric?.value == null || d == null) return { ...mk, status: "na", d: null };
+    if (value == null) return { ...mk, status: "na", reason: "no reading", value: null, d: null };
+    if (d == null) {
+      const reason = metric.is_fallback ? "fallback" : metric.is_estimated ? "estimated" : "baseline";
+      return { ...mk, status: "na", reason, value, d: null };
+    }
     const elevated = mk.bad === "up" ? d >= mk.thresh : d <= -mk.thresh;
-    return { ...mk, status: elevated ? "elevated" : "ok", d };
+    return { ...mk, status: elevated ? "elevated" : "ok", value, d };
   });
   const avail = evald.filter((x) => x.status !== "na");
   const flagged = avail.filter((x) => x.status === "elevated");
+  const na = evald.filter((x) => x.status === "na");
   const n = flagged.length;
   const color =
     avail.length === 0 ? "var(--muted)" : n === 0 ? "var(--good)" : n <= 1 ? "var(--warn)" : "var(--bad)";
+
+  // When nothing can be judged, say why rather than a bare "no data".
+  const readings = na.filter((x) => x.value != null);
+  const emptyMsg =
+    readings.length === 0
+      ? "no vitals synced for this day"
+      : buildingBaseline || readings.some((x) => x.reason === "baseline")
+        ? `${readings.length} reading${readings.length > 1 ? "s" : ""} in — building baseline to compare`
+        : readings.some((x) => x.reason === "fallback")
+          ? "on a fallback source — no baseline to compare against"
+          : "not enough baseline yet";
+
+  // Compact "waiting on X (why)" line, grouped by reason, so a blank OR partial
+  // read explains which markers are missing and what they need.
+  const byReason = na.reduce((acc, x) => {
+    (acc[x.reason] = acc[x.reason] || []).push(x.label);
+    return acc;
+  }, {});
+  const waiting = Object.entries(byReason)
+    .map(([reason, labels]) => `${labels.join(", ")} (${REASON_TEXT[reason] || reason})`)
+    .join(" · ");
+
   return (
     <div className="panel">
       <div className="label">Inflammation markers</div>
@@ -186,11 +224,16 @@ function InflammationRead({ m }) {
       </div>
       <div className="metric-sub">
         {avail.length === 0
-          ? "no data for this day"
+          ? emptyMsg
           : n === 0
             ? "all within your normal range"
             : flagged.map((x) => `${x.label} ${x.d > 0 ? "+" : ""}${Math.round(x.d)}%`).join(" · ")}
       </div>
+      {na.length > 0 && (
+        <div className="mono" style={{ fontSize: "0.62rem", color: "var(--muted)", marginTop: "0.35rem" }}>
+          waiting on {waiting}
+        </div>
+      )}
     </div>
   );
 }
@@ -374,7 +417,7 @@ export default function DailyView() {
               <TrendSnapshot label="Resting HR trend" trend={rhrTrend} unit="bpm" betterWhen="down" color="#38bdf8" />
             </div>
             <div className="grid" style={{ marginTop: "0.85rem" }}>
-              <InflammationRead m={m} />
+              <InflammationRead m={m} buildingBaseline={daily.building_baseline} />
             </div>
             <div className="grid cols-3" style={{ marginTop: "0.85rem" }}>
               <MetricStat label="Respiratory rate" metric={m.respiratory_rate} unit="br/min" digits={1} neutral />
