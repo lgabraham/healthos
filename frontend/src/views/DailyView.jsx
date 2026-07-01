@@ -10,6 +10,10 @@ import EventTimeline from "../components/EventTimeline.jsx";
 import CalendarStrip from "../components/CalendarStrip.jsx";
 import AttributionPanel from "../components/AttributionPanel.jsx";
 import DatePicker from "../components/DatePicker.jsx";
+import { useStepGoal } from "../hooks/useStepGoal.js";
+import { useSkipDays } from "../hooks/useSkipDays.js";
+import { useRhrOffset } from "../hooks/useRhrOffset.js";
+import { activityStreak, sleepStreak } from "../lib/streaks.js";
 import { hm, num } from "../format.js";
 
 function shiftDate(iso, days) {
@@ -191,6 +195,41 @@ function InflammationRead({ m }) {
   );
 }
 
+// A headline streak tile (workout / sleep), mirroring the Streak & Sleep tabs.
+// The streak is a rolling "current" figure, independent of the viewed day.
+function StreakHero({ label, icon, count, longest, unit, loading }) {
+  return (
+    <div className="panel hero">
+      <div className="label">{label}</div>
+      <div className="metric-value xl" style={{ color: count > 0 ? "var(--accent)" : "var(--muted)" }}>
+        {loading ? "…" : `${icon} ${count}`}
+      </div>
+      <div className="metric-sub">
+        {loading ? "loading…" : count > 0 ? `${unit} kept going · best ${longest}` : `start ${unit === "days" ? "today" : "tonight"}`}
+      </div>
+    </div>
+  );
+}
+
+// Uppercase mono section label to group the folded breakdown, matching the
+// Streaks page headings.
+function SectionHeading({ children }) {
+  return (
+    <div
+      style={{
+        fontFamily: "var(--mono)",
+        fontSize: "0.74rem",
+        letterSpacing: "0.08em",
+        textTransform: "uppercase",
+        color: "var(--muted)",
+        margin: "1.1rem 0 0.6rem",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 export default function DailyView() {
   const [date, setDate] = useState(null); // null = latest complete day (Pulse default)
   const [showAll, setShowAll] = useState(false);
@@ -199,6 +238,18 @@ export default function DailyView() {
   const { data: rhrTrend } = useHealthData(() => api.trend("resting_hr", 30, 7), []);
   const { data: status } = useHealthData(() => api.status(), []);
   const { data: journal } = useHealthData(() => api.journal(7), []);
+  // Streak headliners: same inputs the Streak/Sleep tabs use, so the numbers agree.
+  const { data: stepsTrend } = useHealthData(() => api.trend("steps", 90), []);
+  const { data: workoutsHist } = useHealthData(() => api.workouts(90), []);
+  const { data: sleepHist } = useHealthData(() => api.sleep(90), []);
+  const { data: rhrRaw } = useHealthData(() => api.trend("resting_hr", 90, 1), []);
+  const { data: calendar } = useHealthData(() => api.calendar(90), []);
+  const [goal] = useStepGoal();
+  const [skipDays] = useSkipDays();
+  const [rhrOffset] = useRhrOffset();
+
+  const act = activityStreak(stepsTrend?.series, workoutsHist, goal, skipDays);
+  const slp = sleepStreak({ sleep: sleepHist, rhrSeries: rhrRaw?.series, calendar, rhrOffset });
 
   const today = todayISO();
   const atToday = daily && daily.date >= today;
@@ -275,8 +326,9 @@ export default function DailyView() {
           </div>
         ) : (
         <>
-        {/* The headline signals. */}
-        <div className="grid cols-3">
+        {/* Four headline signals: cardiac readiness + the two streaks. Every
+            other metric folds into the breakdown below. */}
+        <div className="grid cols-4">
           <HeroMetric
             label="HRV (nocturnal)"
             metric={m.hrv_rmssd}
@@ -291,28 +343,23 @@ export default function DailyView() {
             trend={trendUpTo(rhrTrend, daily.date)}
             color="#38bdf8"
           />
-          <HeroSleep sleep={daily.sleep} />
+          <StreakHero
+            label="Workout streak"
+            icon="🔥"
+            count={act.streak}
+            longest={act.longest}
+            unit="days"
+            loading={stepsTrend == null}
+          />
+          <StreakHero
+            label="Sleep streak"
+            icon="🌙"
+            count={slp.streak}
+            longest={slp.longest}
+            unit="nights"
+            loading={sleepHist == null}
+          />
         </div>
-
-        {/* HR + HRV trend snapshot: where the two cardiac signals are heading
-            over the last 30 days (7d rolling vs the prior baseline). */}
-        <div className="grid cols-2" style={{ marginTop: "0.85rem" }}>
-          <TrendSnapshot label="HRV trend" trend={hrvTrend} unit="ms" betterWhen="up" color="#f59e0b" />
-          <TrendSnapshot label="Resting HR trend" trend={rhrTrend} unit="bpm" betterWhen="down" color="#38bdf8" />
-        </div>
-
-        {/* Inflammation: a one-line read summarizing the relevant vitals below.
-            Elevated resp rate / skin temp + low HRV is the flare signature. */}
-        <div className="grid" style={{ marginTop: "0.85rem" }}>
-          <InflammationRead m={m} />
-        </div>
-        <div className="grid cols-3" style={{ marginTop: "0.85rem" }}>
-          <MetricStat label="Respiratory rate" metric={m.respiratory_rate} unit="br/min" digits={1} neutral />
-          <MetricStat label="Skin temp" metric={m.skin_temp} unit="°C" digits={1} neutral />
-          <MetricStat label="SpO₂" metric={m.spo2} unit="%" neutral />
-        </div>
-
-        <RecentIntake entries={journal} />
 
         <button className="section-toggle" onClick={() => setShowAll((s) => !s)}>
           {showAll ? "▾ hide full breakdown" : "▸ full breakdown"}
@@ -320,25 +367,38 @@ export default function DailyView() {
 
         {showAll && (
           <>
+            {/* Vitals: the cardiac trend + the inflammation read and its markers. */}
+            <SectionHeading>Vitals</SectionHeading>
+            <div className="grid cols-2">
+              <TrendSnapshot label="HRV trend" trend={hrvTrend} unit="ms" betterWhen="up" color="#f59e0b" />
+              <TrendSnapshot label="Resting HR trend" trend={rhrTrend} unit="bpm" betterWhen="down" color="#38bdf8" />
+            </div>
+            <div className="grid" style={{ marginTop: "0.85rem" }}>
+              <InflammationRead m={m} />
+            </div>
+            <div className="grid cols-3" style={{ marginTop: "0.85rem" }}>
+              <MetricStat label="Respiratory rate" metric={m.respiratory_rate} unit="br/min" digits={1} neutral />
+              <MetricStat label="Skin temp" metric={m.skin_temp} unit="°C" digits={1} neutral />
+              <MetricStat label="SpO₂" metric={m.spo2} unit="%" neutral />
+            </div>
+
+            {/* Sleep: last night's duration + stages + the night's events. */}
+            <SectionHeading>Sleep</SectionHeading>
+            <div className="grid cols-2">
+              <HeroSleep sleep={daily.sleep} />
+              <SleepCard sleep={daily.sleep} />
+            </div>
+            <div className="grid" style={{ marginTop: "0.85rem" }}>
+              <EventTimeline events={daily.events} title="Inferred / confirmed events" />
+            </div>
+
+            {/* Recovery & activity. */}
+            <SectionHeading>Recovery &amp; activity</SectionHeading>
             <div className="grid cols-3">
               <RecoveryScore metric={m.recovery_score} />
               <MetricStat label="Strain" metric={m.strain_score} digits={1} neutral />
               <MetricStat label="Steps" metric={m.steps} neutral />
             </div>
-
-            <div className="grid" style={{ marginTop: "0.85rem" }}>
-              <AttributionPanel date={daily.date} />
-            </div>
-
-            <div className="grid cols-2" style={{ marginTop: "0.85rem" }}>
-              <SleepCard sleep={daily.sleep} />
-              <EventTimeline events={daily.events} title="Inferred / confirmed events" />
-            </div>
-
-            <div className="grid" style={{ marginTop: "0.85rem" }}>
-              <CalendarStrip events={daily.calendar} viewDate={daily.date} />
-            </div>
-
             <div className="grid" style={{ marginTop: "0.85rem" }}>
               <div className="panel" style={wkStale ? { opacity: 0.6 } : undefined}>
                 <div className="label">Last workout</div>
@@ -362,6 +422,16 @@ export default function DailyView() {
                   <div className="metric-sub">No recent workout.</div>
                 )}
               </div>
+            </div>
+
+            {/* Day context: what you logged, the attribution, and the calendar. */}
+            <SectionHeading>Day context</SectionHeading>
+            <RecentIntake entries={journal} />
+            <div className="grid" style={{ marginTop: "0.85rem" }}>
+              <AttributionPanel date={daily.date} />
+            </div>
+            <div className="grid" style={{ marginTop: "0.85rem" }}>
+              <CalendarStrip events={daily.calendar} viewDate={daily.date} />
             </div>
           </>
         )}

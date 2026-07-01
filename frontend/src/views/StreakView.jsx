@@ -2,6 +2,7 @@ import { api } from "../api.js";
 import { useHealthData } from "../hooks/useHealthData.js";
 import { useStepGoal, STEP_GOALS } from "../hooks/useStepGoal.js";
 import { useSkipDays, SKIP_DAYS } from "../hooks/useSkipDays.js";
+import { buildActivityDays, computeActivityStreak } from "../lib/streaks.js";
 import { Badge } from "@/components/ui/badge";
 
 // A day "counts" if you worked out OR hit the step goal. Up to `allowedSkips`
@@ -17,51 +18,6 @@ const MARK_COLOR = {
   broken: "#5b1a1a", // 2nd weekday rest in a row — streak broke
   pending: "#1a1a1a", // today, not yet active
 };
-
-function todayISO() {
-  return new Date().toLocaleDateString("en-CA");
-}
-
-function buildDays(stepsSeries, workouts, goal) {
-  const workoutDays = new Set((workouts || []).map((w) => w.date));
-  return (stepsSeries || []).map((d) => {
-    const worked = workoutDays.has(d.date);
-    const hitGoal = d.value != null && d.value >= goal;
-    return { date: d.date, steps: d.value, worked, hitGoal, active: worked || hitGoal };
-  });
-}
-
-function computeStreak(days, allowedSkips) {
-  const today = todayISO();
-  let streak = 0;
-  let longest = 0;
-  let restRun = 0; // consecutive weekday rest days (weekends don't count)
-  for (const d of days) {
-    const dow = new Date(`${d.date}T00:00:00`).getDay();
-    const weekend = dow === 0 || dow === 6;
-    if (d.date === today && !d.active) {
-      d.mark = "pending";
-      continue;
-    }
-    if (d.active) {
-      streak += 1;
-      restRun = 0;
-      d.mark = d.worked ? "workout" : "steps";
-    } else if (weekend) {
-      // Weekends are free: never break, and don't use up an allowed skip.
-      streak += 1;
-      d.mark = "weekend";
-    } else if (++restRun > allowedSkips) {
-      streak = 0;
-      d.mark = "broken";
-    } else {
-      streak += 1;
-      d.mark = "rest";
-    }
-    longest = Math.max(longest, streak);
-  }
-  return { streak, longest };
-}
 
 function markLabel(d) {
   if (d.mark === "workout") return "workout";
@@ -112,8 +68,8 @@ export default function StreakView() {
   if (loading) return <div className="muted mono">loading…</div>;
   if (error) return <div className="error">error: {error}</div>;
 
-  const days = buildDays(steps?.series, workouts, goal);
-  const { streak, longest } = computeStreak(days, skipDays);
+  const days = buildActivityDays(steps?.series, workouts, goal);
+  const { streak, longest } = computeActivityStreak(days, skipDays);
   const weeks = toWeeks(days);
   const last7 = days.slice(-7);
   const activeThisWeek = last7.filter((d) => d.active).length;
