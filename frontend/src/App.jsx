@@ -6,11 +6,13 @@ import TrendsView from "./views/TrendsView.jsx";
 import WorkoutsView from "./views/WorkoutsView.jsx";
 import StreaksView from "./views/StreaksView.jsx";
 import JournalView from "./views/JournalView.jsx";
+import CorrelationsView from "./views/CorrelationsView.jsx";
 
 const VIEWS = {
   pulse: { label: "Pulse", component: DailyView },
   streak: { label: "Streak", component: StreaksView },
   trends: { label: "Trends", component: TrendsView },
+  links: { label: "Links", component: CorrelationsView },
   workouts: { label: "Workouts", component: WorkoutsView },
   journal: { label: "Journal", component: JournalView },
 };
@@ -83,6 +85,14 @@ export default function App() {
     window.location.hash = key;
     setView(key);
   };
+  // Keep the view in sync with the URL hash so browser back/forward (and any
+  // deep link) actually switch tabs — on iOS a swipe-back otherwise left the
+  // hash and the visible view out of sync until a full reload.
+  useEffect(() => {
+    const onHashChange = () => setView(viewFromHash());
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
 
   return (
     <div className="app">

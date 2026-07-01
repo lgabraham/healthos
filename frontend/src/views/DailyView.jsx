@@ -17,9 +17,12 @@ import { activityStreak, sleepStreak } from "../lib/streaks.js";
 import { hm, num } from "../format.js";
 
 function shiftDate(iso, days) {
+  // Parse AND serialize in local time. Using toISOString() here (UTC) while
+  // parsing local midnight shifted the result by a day in any UTC+ timezone,
+  // which broke the next/prev-day buttons east of Greenwich.
   const d = new Date(`${iso}T00:00:00`);
   d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
+  return d.toLocaleDateString("en-CA"); // YYYY-MM-DD, local time
 }
 
 function todayISO() {

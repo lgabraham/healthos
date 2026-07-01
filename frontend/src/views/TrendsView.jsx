@@ -69,7 +69,7 @@ function Chart({ metric, title, color, days, unit, goodUp, yFormat }) {
       {error && <div className="error">error: {error}</div>}
       {data && (
         <>
-          <TrendChart series={data.series} color={color} yFormat={yFormat} />
+          <TrendChart series={data.series} events={data.events} color={color} yFormat={yFormat} />
           <div className="muted mono" style={{ fontSize: "0.66rem", marginTop: "0.3rem" }}>
             thin gray = daily · solid = 7d avg · dashed = ~4-week baseline (long-term trend) · band
             = usual range
