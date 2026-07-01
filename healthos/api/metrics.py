@@ -10,7 +10,7 @@ from __future__ import annotations
 import threading
 import uuid as _uuid
 from datetime import date as _date
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -277,11 +277,23 @@ def create_workout(payload: WorkoutIn, db: Session = Depends(db_session)) -> dic
     sport = payload.sport_type.strip()
     if not sport:
         raise HTTPException(status_code=400, detail="sport_type required.")
-    day = _date.fromisoformat(payload.date) if payload.date else _date.today()
+    today = datetime.now(settings.tz).date()
+    day = _date.fromisoformat(payload.date) if payload.date else today
+    # Stamp a local start_time so the workout is sortable like a device one — the
+    # "last workout" ranking and the late-workout inference both key off it, and a
+    # timestamp-less manual row would otherwise be buried beneath any device
+    # workout. Use "now" when logging for today (the walk just happened), else
+    # noon on that day as a neutral within-day default.
+    start = datetime.now(settings.tz) if day == today else datetime.combine(
+        day, time(12, 0), tzinfo=settings.tz
+    )
+    end = start + timedelta(minutes=payload.duration_minutes) if payload.duration_minutes else None
     w = Workout(
         date=day,
         source="manual",
         sport_type=sport,
+        start_time=start,
+        end_time=end,
         duration_minutes=payload.duration_minutes,
         distance_km=payload.distance_km,
         calories=payload.calories,

@@ -380,10 +380,16 @@ def best_available_sleep(session: Session, day: _date) -> SleepSession | None:
 
 
 def latest_workout(session: Session, on_or_before: _date) -> Workout | None:
+    # Rank by day first, then time-of-day. A timestamp-less row (a manually
+    # logged workout with no start_time — the API now stamps one, but older rows
+    # may not) sorts FIRST within its day via NULLS FIRST, so a walk you logged
+    # for today isn't buried beneath a device workout that merely has a clock
+    # time. Device rows all carry start_time and their date matches it, so for
+    # them this is equivalent to the old pure start_time ordering.
     return session.scalars(
         select(Workout)
         .where(Workout.date <= on_or_before)
-        .order_by(Workout.start_time.desc().nullslast(), Workout.date.desc())
+        .order_by(Workout.date.desc(), Workout.start_time.desc().nullsfirst())
     ).first()
 
 
