@@ -69,8 +69,9 @@ healthos summary                       # sanity-check a day from the CLI
 cd frontend && pnpm install && pnpm dev   # http://localhost:5173 (proxies to :8000)
 ```
 
-The nightly sync runs automatically inside the API process at `SYNC_HOUR` local
-time (default 06:00). Trigger an ad-hoc sync any time:
+The nightly sync runs automatically inside the API process at
+`SYNC_HOUR:SYNC_MINUTE` local time (default 07:30). Trigger an ad-hoc sync any
+time:
 
 ```bash
 curl -X POST "localhost:8000/api/admin/sync"                       # yesterday, all sources
@@ -104,6 +105,25 @@ HealthOS auth check:
   browser and approve — tokens are saved to the DB automatically (nothing to
   copy-paste; works from mobile). Re-run `healthos doctor` to confirm a `✓`.
 
+## Securing the dashboard
+
+HealthOS holds your full health history, so gate it behind one shared secret:
+
+```
+HEALTHOS_AUTH_TOKEN=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
+```
+
+- **Dashboard**: the first visit on a device redirects to a `/login` password
+  page; entering the secret sets a 30-day HttpOnly session cookie (log in once).
+- **API / webhooks / curl / iOS Shortcut**: send the secret as
+  `Authorization: Bearer <token>`, an `X-API-Key` header, or a `?token=` query
+  param (handy for the iOS Shortcut URL).
+
+`/health` and the Whoop OAuth callback stay public. If `HEALTHOS_AUTH_TOKEN` is
+**unset**, auth is disabled (frictionless local dev) and the app logs a loud
+startup warning — so **set it before exposing HealthOS publicly**. The MCP
+server talks to the DB directly and isn't exposed over HTTP, so it's unaffected.
+
 ## Canonical sources
 
 When multiple devices report the same metric, all are stored but exactly one is
@@ -111,9 +131,16 @@ flagged `is_canonical`. See `healthos/canonical.py` for the full map:
 
 | Metric | Canonical |
 |---|---|
-| HRV, resting HR, sleep duration & staging, recovery, strain | **whoop** |
-| Exercise HR, VO₂ max, training load / TSS, steps, workouts | **garmin** |
-| Sleep environment (bed/skin/room temp, toss & turn) | **eight_sleep** |
+| HRV, resting HR, sleep duration & staging, sleep environment (bed/skin/room temp, toss & turn) | **eight_sleep** |
+| Recovery score, strain, SpO₂, respiratory rate | **whoop** |
+| Exercise HR, VO₂ max, training load / TSS, workouts | **garmin** |
+| Steps | **apple_health** (Garmin is the fallback) |
+
+Canonical = your *primary* device for each signal (what you actually wear or
+sleep on nightly), not the theoretically-best instrument. You sleep on the Eight
+Sleep, so it owns the nightly cardiac/sleep signals; Whoop is the labeled
+fallback for nights away from the pod. When the canonical device has a gap, the
+best-ranked fallback source fills in and is labeled as such.
 
 Baselines use a rolling 30-day window and **exclude days flagged `sick`**.
 
@@ -167,11 +194,13 @@ Config (defaults target the app's values; override per account if needed):
   set this to pin it.
 - `HARVIA_ENDPOINT_BASE` (default `https://prod.myharvia-cloud.net`)
 
-**Capture-then-listen.** MyHarvia exposes only *current* state + the *latest*
-data point plus a live websocket subscription — there is **no history query** —
-so confirmed sessions are recorded by a persistent listener on the always-on
-M1 (not a nightly pull). Before that listener's session-detection is finalized,
-dump your sauna's live shape:
+**Capture-then-poll.** MyHarvia exposes only *current* state + the *latest*
+data point — there is **no history query** — so confirmed sessions are recorded
+by a persistent monitor (`healthos harvia-monitor`) that polls the stove's
+on/off state every `HARVIA_POLL_SECONDS` (default 60) on the always-on M1, not a
+nightly pull. It re-authenticates automatically when its Cognito token expires,
+so it keeps capturing across long-running sessions. Before its session-detection
+is finalized, dump your sauna's live shape:
 
 ```bash
 healthos harvia-raw   # device tree + each device's state + latest data JSON
@@ -215,9 +244,12 @@ python -m healthos.mcp_server
 ```
 
 Tools: `get_daily_summary`, `get_metric_trend`, `get_sleep_history`,
-`get_workout_history`, `get_events`, `correlate`, `query_raw` (read-only SELECT
-guardrails), plus `data_overview`. Trend answers always carry sample size and
-flag baselines under 30 days.
+`get_workout_history`, `get_events`, `correlate`, `query_raw`, plus
+`data_overview`. Trend answers always carry sample size and flag baselines under
+30 days. `query_raw` runs inside a genuinely read-only Postgres transaction with
+a statement timeout and a table/column denylist — writes (including
+data-modifying CTEs), long-running functions, the OAuth-token table, and the
+redacted calendar title/location columns are all rejected.
 
 Add to Claude Desktop using `claude_desktop_config.example.json` (copy into your
 `claude_desktop_config.json`, set `cwd` and `DATABASE_URL`). Then ask things
@@ -225,10 +257,12 @@ like *"How did my HRV change the week after heavy training blocks?"*
 
 ## Dashboard
 
-Three views — **Daily** (recovery, HRV vs baseline, sleep segments, events, last
-workout), **Trends** (30/60/90-day toggle with 7-day rolling averages and event
-markers), and **Correlations** (scatter + r + sample size + plain-language read).
-Dark `#0a0a0a`, amber `#f59e0b` accent, IBM Plex Mono for values.
+Tabs — **Pulse** (headliners + full daily breakdown: recovery, HRV vs baseline,
+sleep segments, events, last workout), **Streak** (sleep & activity streaks),
+**Trends** (30/60/90-day/1y toggle with 7-day rolling averages and event
+markers), **Links** (correlations: scatter + r + sample size + plain-language
+read), **Workouts**, and **Journal**. Dark `#0a0a0a`, amber `#f59e0b` accent,
+IBM Plex Mono for values.
 
 Build for production with `pnpm build` (outputs `frontend/dist/`). Two options:
 deploy the bundle to Vercel and point it at the API via `VITE_API_BASE`, **or**
@@ -241,7 +275,8 @@ both the dashboard and the API at one URL (convenient on mobile).
 The `Dockerfile` builds the dashboard and serves it alongside the API as a
 single service; on deploy it runs `alembic upgrade head` then boots uvicorn +
 the embedded nightly scheduler — no separate worker or cron. Provision a
-Postgres plugin, set the env vars from `.env.example`, generate a domain, and
+Postgres plugin, set the env vars from `.env.example` (**including
+`HEALTHOS_AUTH_TOKEN`** — the deploy is public), generate a domain, and
 authorize Whoop once at `/auth/whoop`.
 
 Full click-by-click walkthrough: **[DEPLOY.md](DEPLOY.md)**.

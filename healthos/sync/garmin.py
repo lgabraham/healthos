@@ -119,7 +119,7 @@ def normalize_daily(day: _date, summary: dict | None) -> list[MetricPoint]:
     if steps is not None:
         points.append(MetricPoint(day, "steps", float(steps), "steps", SOURCE, summary))
     # Resting HR rides along in the daily summary — a free fallback that fills
-    # RHR gaps on days Whoop didn't record (it's non-canonical; Whoop wins).
+    # RHR gaps on days the pod didn't record (non-canonical; Eight Sleep wins).
     rhr = summary.get("restingHeartRate")
     if rhr is not None and rhr > 0:
         points.append(MetricPoint(day, "resting_hr", float(rhr), "bpm", SOURCE, None))
@@ -139,7 +139,7 @@ def normalize_hrv(day: _date, data: dict | None) -> list[MetricPoint]:
 
     ``lastNightAvg`` is the average for the night that ended on ``day`` — same
     "the night that ended this morning" convention the rest of HealthOS uses,
-    so it lines up with Whoop/Eight Sleep HRV. Non-canonical (Whoop wins), so
+    so it lines up with Eight Sleep/Whoop HRV. Non-canonical (the pod wins), so
     it transparently fills HRV gaps when Whoop has none.
     """
     if not data:

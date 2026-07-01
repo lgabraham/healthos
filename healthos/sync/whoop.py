@@ -6,7 +6,9 @@ Endpoints used (Whoop developer API v1):
     GET /activity/workout-> strain workouts
     GET /cycle           -> day strain
 
-Whoop is canonical for HRV, resting HR, sleep, recovery, and strain.
+Whoop is canonical for the scores only it produces (recovery, strain, SpO₂,
+respiratory rate); its HRV / resting HR / sleep are stored as a labeled fallback
+for nights away from the Eight Sleep pod (the canonical nightly source).
 All endpoints are cursor-paginated via ``next_token``.
 """
 

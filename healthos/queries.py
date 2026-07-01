@@ -366,8 +366,9 @@ def canonical_sleep(session: Session, day: _date) -> SleepSession | None:
 
 
 def best_available_sleep(session: Session, day: _date) -> SleepSession | None:
-    """Canonical (Whoop) sleep if present, else the most recent session from any
-    source for the day — so the pod's sleep shows when Whoop has a gap."""
+    """Canonical (Eight Sleep) sleep if present, else the most recent session
+    from any source for the day — so Whoop's sleep shows on nights away from the
+    pod."""
     canon = canonical_sleep(session, day)
     if canon is not None:
         return canon

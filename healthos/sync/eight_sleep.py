@@ -240,9 +240,9 @@ def normalize(sessions: list[dict]) -> tuple[list[SleepRecord], list[MetricPoint
         tnt_values = _series_values(ts, "tnt")
         toss = sum(tnt_values) if tnt_values else (interval.get("tnt") or None)
 
-        # Cardiac signals from the pod's timeseries — stored NON-canonically
-        # (Whoop owns HRV/RHR) so they can serve as a labeled fallback when
-        # Whoop has a gap. rmssd ~ HRV; resting HR ~ the night's low.
+        # Cardiac signals from the pod's timeseries — the pod is canonical for
+        # HRV/RHR now, so these are the primary nightly values (Whoop fills in
+        # only on nights away from the pod). rmssd ~ HRV; resting HR ~ night low.
         hrv = _avg(_series_values(ts, "rmssd"))
         hr_series = _series_values(ts, "heartRate")
         resting_hr = _resting_hr(hr_series)
@@ -273,8 +273,8 @@ def normalize(sessions: list[dict]) -> tuple[list[SleepRecord], list[MetricPoint
             ("skin_temp", skin_temp),
             ("room_temp", room_temp),
             ("toss_turn_count", toss),
-            ("hrv_rmssd", hrv),  # non-canonical (Whoop wins) -> serves as fallback
-            ("resting_hr", resting_hr),  # non-canonical fallback
+            ("hrv_rmssd", hrv),  # canonical nightly HRV (pod is worn nightly)
+            ("resting_hr", resting_hr),  # canonical nightly resting HR
             ("sleep_duration_minutes", durations.get("total")),  # fallback + concordance
         ]:
             if value is not None:
