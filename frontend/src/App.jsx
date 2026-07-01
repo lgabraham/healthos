@@ -7,14 +7,18 @@ import WorkoutsView from "./views/WorkoutsView.jsx";
 import StreaksView from "./views/StreaksView.jsx";
 import JournalView from "./views/JournalView.jsx";
 import CorrelationsView from "./views/CorrelationsView.jsx";
+import SignalsView from "./views/SignalsView.jsx";
+import CoverageView from "./views/CoverageView.jsx";
 
 const VIEWS = {
   pulse: { label: "Pulse", component: DailyView },
   streak: { label: "Streak", component: StreaksView },
   trends: { label: "Trends", component: TrendsView },
+  signals: { label: "Signals", component: SignalsView },
   links: { label: "Links", component: CorrelationsView },
   workouts: { label: "Workouts", component: WorkoutsView },
   journal: { label: "Journal", component: JournalView },
+  data: { label: "Data", component: CoverageView },
 };
 
 function StatusLine() {
