@@ -253,6 +253,85 @@ def test_canonical_flip_to_eight_sleep():
     assert is_canonical_metric("strain_score", "whoop") is True
 
 
+def test_replace_mode_preserves_days_outside_pulled_span(session, monkeypatch):
+    """Eight Sleep's /intervals returns only the most-recent sessions, ignoring
+    the requested window. A replace-mode sync must clamp its delete to the span
+    the pull actually returned, so an OLDER canonical night the pull didn't
+    include is preserved rather than blanked."""
+    from datetime import date as _d
+
+    from healthos.models import DailyMetric
+    from healthos.sync import runner
+    from healthos.sync.persistence import MetricPoint
+
+    recent = _d(2026, 6, 8)
+    old = recent - timedelta(days=5)
+    session.add(DailyMetric(date=old, metric="hrv_rmssd", value=55, unit="ms",
+                            source="eight_sleep", is_canonical=True))
+    session.add(DailyMetric(date=recent, metric="hrv_rmssd", value=40, unit="ms",
+                            source="eight_sleep", is_canonical=True))
+    session.commit()
+
+    # Provider returns ONLY the recent night (pulled span = [recent, recent]).
+    def only_recent(s, e):
+        return {"metrics": [MetricPoint(recent, "hrv_rmssd", 48.0, "ms", "eight_sleep", None)],
+                "sleeps": [], "workouts": []}
+
+    monkeypatch.setitem(runner.SOURCES, "eight_sleep", (only_recent, "eight_sleep"))
+    runner.sync_source("eight_sleep", old, recent, sync_type="manual", replace=True)
+
+    from sqlalchemy import select
+    rows = {r.date: r.value for r in session.scalars(
+        select(DailyMetric).where(DailyMetric.source == "eight_sleep")).all()}
+    assert rows[old] == 55  # older night the pull didn't include survives
+    assert rows[recent] == 48  # recent night rewritten from the pull
+
+
+def test_replace_mode_empty_pull_deletes_nothing(session, monkeypatch):
+    """A transient empty pull must not wipe the window (span is None -> no delete)."""
+    from datetime import date as _d
+
+    from healthos.models import DailyMetric
+    from healthos.sync import runner
+
+    d = _d(2026, 6, 8)
+    session.add(DailyMetric(date=d, metric="hrv_rmssd", value=42, unit="ms",
+                            source="eight_sleep", is_canonical=True))
+    session.commit()
+    monkeypatch.setitem(runner.SOURCES, "eight_sleep",
+                        (lambda s, e: {"metrics": [], "sleeps": [], "workouts": []}, "eight_sleep"))
+    runner.sync_source("eight_sleep", d, d, sync_type="manual", replace=True)
+    from sqlalchemy import select
+    assert session.scalars(
+        select(DailyMetric).where(DailyMetric.source == "eight_sleep")
+    ).all()  # survives an empty replace pull
+
+
+def test_eight_sleep_skips_in_progress_today_session():
+    """An unscored session dated today is still in progress — skip it so a partial
+    short/low-HRV night doesn't pollute baselines. Scored-today and unscored-past
+    sessions are kept."""
+    from datetime import datetime, timedelta as _td
+
+    from healthos.config import settings
+    import healthos.sync.eight_sleep as es
+
+    now = datetime.now(settings.tz)
+    start = (now - _td(hours=2)).isoformat()
+
+    def sess(ts, score):
+        return {"ts": ts, "stages": [{"stage": "light", "duration": 3600}],
+                "score": score, "timeseries": {}}
+
+    unscored_today = sess(start, 0)
+    scored_today = sess(start, 80)
+    unscored_past = sess((now - _td(days=3)).isoformat(), 0)
+
+    assert es.normalize([unscored_today]) == ([], [])  # in-progress -> skipped
+    assert len(es.normalize([scored_today])[0]) == 1  # finalized today -> kept
+    assert len(es.normalize([unscored_past])[0]) == 1  # past unscored -> kept
+
+
 def test_estimated_recovery_rewards_sleep(session):
     """A night with more sleep than baseline scores higher than the same
     HRV/RHR night with baseline sleep — sleep now counts."""

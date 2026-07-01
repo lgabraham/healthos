@@ -257,7 +257,11 @@ def attribution(session: Session, day: _date) -> dict:
     headline = None
     # Headline only considers directional drivers — "strain is helping" reads
     # like advice; "HRV is dragging" is the kind of claim we can stand behind.
-    directional = [d for d in drivers if not d["neutral"]]
+    # Fallback-sourced drivers are also excluded: a travel-night HRV from Whoop
+    # compared to your Eight-Sleep-only baseline can read as a big "mover" purely
+    # from the instrument offset, so it shouldn't headline (it still shows in the
+    # chart, labeled with its source).
+    directional = [d for d in drivers if not d["neutral"] and not d["is_fallback"]]
     if directional and abs(directional[0]["pct"]) >= 5:
         top = directional[0]
         direction = "helping" if top["pct"] > 0 else "dragging"

@@ -44,18 +44,21 @@ export default function TrendSnapshot({ label, trend, unit, digits = 0, betterWh
   const prior = avg(raw.slice(0, -7));
   const delta = recent != null && prior != null ? recent - prior : null;
   const deltaPct = delta != null && prior ? (delta / prior) * 100 : null;
-  const flat = deltaPct == null || Math.abs(deltaPct) < 2;
+  // No prior window yet (needs >1 week of history) — say so rather than showing
+  // a real 7d number beside a misleading "→ —% vs prior".
+  const noPrior = deltaPct == null;
+  const flat = !noPrior && Math.abs(deltaPct) < 2;
   const up = delta != null && delta > 0;
   const good = betterWhen === "up" ? up : !up;
   const arrow = flat ? "→" : up ? "↑" : "↓";
-  const moveColor = flat ? "var(--muted)" : good ? "var(--good)" : "var(--bad)";
+  const moveColor = noPrior || flat ? "var(--muted)" : good ? "var(--good)" : "var(--bad)";
 
   return (
     <div className="panel">
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "0.5rem" }}>
         <div className="label">{label}</div>
         <div className="mono" style={{ fontSize: "0.72rem", color: moveColor, whiteSpace: "nowrap" }}>
-          {arrow} {deltaPct != null ? `${deltaPct > 0 ? "+" : ""}${Math.round(deltaPct)}%` : "—"} vs prior
+          {noPrior ? "building trend" : `${arrow} ${deltaPct > 0 ? "+" : ""}${Math.round(deltaPct)}% vs prior`}
         </div>
       </div>
       <div className="metric-value" style={{ fontSize: "1.5rem", marginTop: "0.2rem" }}>

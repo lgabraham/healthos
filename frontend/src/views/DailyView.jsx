@@ -308,15 +308,10 @@ export default function DailyView() {
     return () => window.removeEventListener("keydown", onKey);
   }, [daily, atToday]);
 
-  // Pulse always lands on data: if the viewed day turns out empty (e.g. you
-  // stepped onto a gap), fall back to the latest complete day. Guarded by
-  // `date !== null` so the latest-day fetch itself never loops.
-  useEffect(() => {
-    if (!daily || date === null) return;
-    const has =
-      Object.values(daily.metrics || {}).some((x) => x && x.value != null) || daily.sleep != null;
-    if (!has) setDate(null);
-  }, [daily, date]);
+  // Note: Pulse defaults to the latest complete day server-side (a null date
+  // fetches it). When you deliberately navigate to an empty day we now SHOW the
+  // "no data" panel (with a "view latest complete day" button) rather than
+  // silently yanking you back — so an empty day can actually be inspected.
 
   if (!daily && loading) return <div className="muted mono">loading…</div>;
   if (error) return <div className="error">error: {error}</div>;

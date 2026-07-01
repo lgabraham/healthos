@@ -196,9 +196,18 @@ def _series_values(timeseries: dict, key: str) -> list[float]:
 def normalize(sessions: list[dict]) -> tuple[list[SleepRecord], list[MetricPoint]]:
     sleeps: list[SleepRecord] = []
     points: list[MetricPoint] = []
+    today = datetime.now(settings.tz).date()
     for interval in sessions:
         d = _local_date(interval)
         if d is None:
+            continue
+        # Skip a still-in-progress session: dated today AND unscored. Eight Sleep
+        # only scores a night after you're up, so an unscored "today" session
+        # caught by an early sync is partial — writing it would land a short /
+        # low-HRV row that pollutes baselines (and could be mis-dated a day early
+        # off its truncated stage span). It gets written on a later sync once it's
+        # finalized, or once it's simply no longer "today".
+        if d == today and not interval.get("score"):
             continue
         stages = interval.get("stages") or []
         durations = _stage_durations(stages)

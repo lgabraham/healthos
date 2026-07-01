@@ -54,7 +54,20 @@ def sync_source(
         data = pull_fn(start, end)  # may raise -> nothing is deleted
         with get_session() as session:
             if replace:
-                _delete_source_window(session, source, start, end)
+                # Only clear the span the pull ACTUALLY returned, not the whole
+                # requested window. Eight Sleep's /intervals endpoint ignores the
+                # date range and returns just the most-recent sessions, so a blind
+                # window-wide delete would wipe older canonical nights it simply
+                # didn't include and never rewrite them. Clamping to the pulled
+                # span still mirrors an upstream deletion *within* that span (a gap
+                # day the provider dropped gets deleted and not re-added) while
+                # leaving days outside the provider's reach untouched. An empty
+                # pull deletes nothing — protecting against a transient blank.
+                span = _pulled_date_span(data)
+                if span:
+                    lo, hi = max(start, span[0]), min(end, span[1])
+                    if lo <= hi:
+                        _delete_source_window(session, source, lo, hi)
             written = 0
             written += upsert_metrics(session, data.get("metrics", []))
             written += upsert_sleep(session, data.get("sleeps", []))
@@ -71,6 +84,19 @@ def sync_source(
         with get_session() as session:
             write_sync_log(session, result)
     return result
+
+
+def _pulled_date_span(data: dict) -> tuple[_date, _date] | None:
+    """(min, max) date across the pulled metrics/sleeps/workouts, or None if the
+    pull returned nothing datable — used to bound a replace-mode delete to the
+    range the provider actually reported on."""
+    dates = [
+        rec.date
+        for key in ("metrics", "sleeps", "workouts")
+        for rec in (data.get(key) or [])
+        if getattr(rec, "date", None) is not None
+    ]
+    return (min(dates), max(dates)) if dates else None
 
 
 def _delete_source_window(session, source: str, start: _date, end: _date) -> None:

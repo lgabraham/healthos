@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "./api.js";
-import { useHealthData } from "./hooks/useHealthData.js";
+import { useHealthData, triggerGlobalRefresh } from "./hooks/useHealthData.js";
 import DailyView from "./views/DailyView.jsx";
 import TrendsView from "./views/TrendsView.jsx";
 import WorkoutsView from "./views/WorkoutsView.jsx";
@@ -29,7 +29,10 @@ function StatusLine() {
 
 // Re-pull recent days (replace mode) so upstream edits/deletions — e.g. an
 // Eight Sleep session you removed because a kid was in the bed — take effect.
-// Fires the background sync, polls until done, then reloads to show fresh data.
+// Fires the background sync, polls until done, then refreshes the data in place
+// (no page reload, so unsaved Journal/Workout form text survives).
+const MAX_POLLS = 80; // ~2 min at 1.5s — stop polling if sync-status never settles
+
 function RefreshButton() {
   const [state, setState] = useState("idle"); // idle | syncing | done | error
   const poll = useRef(null);
@@ -38,16 +41,15 @@ function RefreshButton() {
   const start = async () => {
     if (state === "syncing") return;
     setState("syncing");
-    const r = await api.triggerSync(7).catch(() => ({ started: false }));
-    if (!r.started) {
-      // Another sync already running — just poll it to completion.
-    }
+    await api.triggerSync(7).catch(() => ({ started: false }));
+    let polls = 0;
     poll.current = setInterval(async () => {
       const s = await api.syncStatus().catch(() => null);
-      if (s && !s.running) {
+      if ((s && !s.running) || ++polls >= MAX_POLLS) {
         clearInterval(poll.current);
-        setState(s.error ? "error" : "done");
-        if (!s.error) setTimeout(() => window.location.reload(), 600);
+        const errored = !s || s.error || polls >= MAX_POLLS;
+        setState(errored ? "error" : "done");
+        if (!errored) triggerGlobalRefresh();
       }
     }, 1500);
   };
