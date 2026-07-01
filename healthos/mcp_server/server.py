@@ -81,7 +81,12 @@ def get_daily_summary(date: str) -> dict:
                 SleepSession.date == day, SleepSession.is_canonical.is_(True)
             )
         ).first()
-        events = s.scalars(select(DailyEvent).where(DailyEvent.date == day)).all()
+        events = s.scalars(
+            select(DailyEvent).where(
+                DailyEvent.date == day,
+                DailyEvent.confidence.is_distinct_from("dismissed"),
+            )
+        ).all()
         return {
             "date": date,
             "metrics": metrics,
@@ -159,7 +164,10 @@ def get_events(days: int = 30, event_type: str | None = None) -> dict:
     with get_session() as s:
         stmt = (
             select(DailyEvent)
-            .where(DailyEvent.date >= _date.today() - timedelta(days=days))
+            .where(
+                DailyEvent.date >= _date.today() - timedelta(days=days),
+                DailyEvent.confidence.is_distinct_from("dismissed"),
+            )
             .order_by(DailyEvent.date.desc())
         )
         if event_type:

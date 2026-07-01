@@ -121,6 +121,32 @@ def test_fetch_and_normalize_intervals():
     assert by_metric["resting_hr"] == 50.0
 
 
+def test_nap_does_not_clobber_the_night():
+    """Two same-date intervals (an afternoon nap + the real night) must collapse
+    to one record — the night — so the nap can't overwrite canonical duration."""
+    night = {
+        "id": "night",
+        "ts": "2023-02-11T05:45:00.000Z",
+        "score": 80,
+        "stages": [
+            {"stage": "light", "duration": 3600},
+            {"stage": "deep", "duration": 5400},
+            {"stage": "rem", "duration": 4500},
+        ],  # 3600+5400+4500 = 13500s = 225 min
+    }
+    nap = {
+        "id": "nap",
+        "ts": "2023-02-11T21:00:00.000Z",  # same morning-filed date
+        "score": 40,
+        "stages": [{"stage": "light", "duration": 2400}],  # 40 min
+    }
+    sleeps, points = es.normalize([nap, night])
+    assert len(sleeps) == 1
+    assert sleeps[0].total_minutes == 225  # the night, not the 40-min nap
+    dur = {p.metric: p.value for p in points}.get("sleep_duration_minutes")
+    assert dur == 225
+
+
 def test_missing_credentials_raise(monkeypatch):
     from healthos.config import settings
 

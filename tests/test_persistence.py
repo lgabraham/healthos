@@ -6,8 +6,15 @@ from datetime import date
 
 from sqlalchemy import select
 
-from healthos.models import DailyEvent, DailyMetric
-from healthos.sync.persistence import EventRecord, MetricPoint, upsert_events, upsert_metrics
+from healthos.models import DailyEvent, DailyMetric, SleepSession
+from healthos.sync.persistence import (
+    EventRecord,
+    MetricPoint,
+    SleepRecord,
+    upsert_events,
+    upsert_metrics,
+    upsert_sleep,
+)
 
 
 def test_canonical_flag_applied(session):
@@ -54,6 +61,23 @@ def test_upsert_events_confirms_inferred_but_not_manual(session):
     assert float(rows[date(2026, 6, 2)].value) == 18
     # Brand-new day inserted.
     assert rows[date(2026, 6, 3)].confidence == "confirmed"
+
+
+def test_upsert_sleep_dedupes_same_date_source_in_one_batch(session):
+    """Two records for the same (date, source) in a single call must collapse to
+    one row — the autoflush-off session can't see the first mid-batch, so without
+    the in-batch dedupe it would insert a permanent duplicate."""
+    d = date(2026, 6, 1)
+    upsert_sleep(session, [
+        SleepRecord(date=d, source="eight_sleep", total_minutes=40),   # nap-ish
+        SleepRecord(date=d, source="eight_sleep", total_minutes=430),  # the night
+    ])
+    session.commit()
+    rows = session.scalars(
+        select(SleepSession).where(SleepSession.source == "eight_sleep")
+    ).all()
+    assert len(rows) == 1
+    assert rows[0].total_minutes == 430  # last record wins
 
 
 def test_upsert_is_idempotent(session):

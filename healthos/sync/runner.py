@@ -54,20 +54,7 @@ def sync_source(
         data = pull_fn(start, end)  # may raise -> nothing is deleted
         with get_session() as session:
             if replace:
-                # Only clear the span the pull ACTUALLY returned, not the whole
-                # requested window. Eight Sleep's /intervals endpoint ignores the
-                # date range and returns just the most-recent sessions, so a blind
-                # window-wide delete would wipe older canonical nights it simply
-                # didn't include and never rewrite them. Clamping to the pulled
-                # span still mirrors an upstream deletion *within* that span (a gap
-                # day the provider dropped gets deleted and not re-added) while
-                # leaving days outside the provider's reach untouched. An empty
-                # pull deletes nothing — protecting against a transient blank.
-                span = _pulled_date_span(data)
-                if span:
-                    lo, hi = max(start, span[0]), min(end, span[1])
-                    if lo <= hi:
-                        _delete_source_window(session, source, lo, hi)
+                _replace_source_window(session, source, start, end, data)
             written = 0
             written += upsert_metrics(session, data.get("metrics", []))
             written += upsert_sleep(session, data.get("sleeps", []))
@@ -86,35 +73,54 @@ def sync_source(
     return result
 
 
-def _pulled_date_span(data: dict) -> tuple[_date, _date] | None:
-    """(min, max) date across the pulled metrics/sleeps/workouts, or None if the
-    pull returned nothing datable — used to bound a replace-mode delete to the
-    range the provider actually reported on."""
-    dates = [
-        rec.date
-        for key in ("metrics", "sleeps", "workouts")
-        for rec in (data.get(key) or [])
-        if getattr(rec, "date", None) is not None
-    ]
+def _date_span(records: list) -> tuple[_date, _date] | None:
+    """(min, max) date across a list of pulled records, or None if empty."""
+    dates = [r.date for r in records if getattr(r, "date", None) is not None]
     return (min(dates), max(dates)) if dates else None
 
 
-def _delete_source_window(session, source: str, start: _date, end: _date) -> None:
-    """Drop a source's metrics/sleeps/workouts in [start, end] (inclusive) so a
-    re-pull becomes an exact mirror of the provider, deletions included."""
+def _replace_source_window(session, source: str, start: _date, end: _date, data: dict) -> None:
+    """Mirror upstream deletions for a source, one record *kind* at a time.
+
+    Each kind (metrics / sleeps / workouts / events) is cleared only within the
+    span the pull actually returned *for that kind*, and only when the pull
+    returned at least one record of it. This is what makes replace mode safe:
+
+    - Eight Sleep's /intervals ignores the date range and returns just recent
+      sessions, so clamping to the pulled span preserves older canonical nights
+      the pull didn't include (while still deleting a gap day dropped *within*
+      the span — mirroring a real deletion).
+    - A kind that came back empty deletes nothing. Critically, this stops a
+      partial provider failure from wiping data: if Garmin returns workouts but
+      its per-day metric calls got rate-limited to nothing, the metrics span is
+      empty, so steps/body-battery/stress are preserved rather than deleted and
+      left un-rewritten. (An all-empty pull therefore deletes nothing — the
+      transient-blank protection.)
+
+    Inference rows (source ``inferred_*``) and manual rows (``manual``) use
+    different sources, so a device source's window delete never touches them.
+    """
     from sqlalchemy import delete
 
     from ..models import DailyEvent, DailyMetric, SleepSession, Workout
 
-    # DailyEvent included so a Harvia re-pull mirrors deletions. Inference rows
-    # use source "inferred_*" and manual rows use "manual", so they're untouched
-    # by a device source's window delete.
-    for model in (DailyMetric, SleepSession, Workout, DailyEvent):
-        session.execute(
-            delete(model).where(
-                model.source == source, model.date >= start, model.date <= end
+    kinds = (
+        ("metrics", DailyMetric),
+        ("sleeps", SleepSession),
+        ("workouts", Workout),
+        ("events", DailyEvent),  # so a Harvia re-pull mirrors its own deletions
+    )
+    for key, model in kinds:
+        span = _date_span(data.get(key) or [])
+        if span is None:
+            continue
+        lo, hi = max(start, span[0]), min(end, span[1])
+        if lo <= hi:
+            session.execute(
+                delete(model).where(
+                    model.source == source, model.date >= lo, model.date <= hi
+                )
             )
-        )
 
 
 def sync_all(start: _date, end: _date, sync_type: str = "daily") -> list[SyncResult]:

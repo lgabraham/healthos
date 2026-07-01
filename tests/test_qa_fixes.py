@@ -174,34 +174,107 @@ def test_metric_sources_matrix(session, client):
     assert res["current_winner_is_fallback"] is False
 
 
-def test_replace_mode_mirrors_upstream_deletion(session, monkeypatch):
-    """A re-sync in replace mode drops a stale session the provider no longer
-    returns (the 'kid slept in my bed, I deleted it' case)."""
+def test_replace_mode_mirrors_deletion_within_pulled_span(session, monkeypatch):
+    """A re-sync in replace mode drops a stale night the provider no longer
+    returns *within the span it did return* (the 'kid slept in my bed, I deleted
+    that one night' case). Other recent nights still come back, so the pull is
+    non-empty and the gap day gets mirrored as a deletion.
+
+    (An entirely empty pull is treated as a transient blank and deletes nothing —
+    see test_replace_mode_empty_pull_deletes_nothing; the two cases are
+    indistinguishable from an empty response, so we err toward not losing data.)
+    """
     from datetime import date as _d
 
     from healthos.models import DailyMetric, SleepSession
+    from healthos.sync.persistence import MetricPoint, SleepRecord
+    from healthos.sync import runner
+
+    d1 = _d(2026, 6, 6)
+    gap = _d(2026, 6, 7)  # the night the user deleted upstream
+    d3 = _d(2026, 6, 8)
+    for d in (d1, gap, d3):
+        session.add(SleepSession(date=d, source="eight_sleep", total_minutes=300,
+                                 is_canonical=True))
+        session.add(DailyMetric(date=d, metric="hrv_rmssd", value=99, unit="ms",
+                                source="eight_sleep", is_canonical=True))
+    session.commit()
+
+    # Provider returns d1 and d3 but NOT the deleted gap night.
+    def without_gap(s, e):
+        return {
+            "metrics": [MetricPoint(d1, "hrv_rmssd", 50.0, "ms", "eight_sleep", None),
+                        MetricPoint(d3, "hrv_rmssd", 52.0, "ms", "eight_sleep", None)],
+            "sleeps": [SleepRecord(date=d1, source="eight_sleep", total_minutes=420),
+                       SleepRecord(date=d3, source="eight_sleep", total_minutes=430)],
+            "workouts": [],
+        }
+
+    monkeypatch.setitem(runner.SOURCES, "eight_sleep", (without_gap, "eight_sleep"))
+    runner.sync_source("eight_sleep", d1, d3, sync_type="manual", replace=True)
+
+    from sqlalchemy import select
+    metric_dates = {r.date for r in session.scalars(
+        select(DailyMetric).where(DailyMetric.source == "eight_sleep")).all()}
+    sleep_dates = {r.date for r in session.scalars(
+        select(SleepSession).where(SleepSession.source == "eight_sleep")).all()}
+    assert metric_dates == {d1, d3}  # gap night mirrored as a deletion
+    assert sleep_dates == {d1, d3}
+    # And the returned days were rewritten from the pull.
+    hrv = {r.date: float(r.value) for r in session.scalars(
+        select(DailyMetric).where(DailyMetric.source == "eight_sleep")).all()}
+    assert hrv[d1] == 50.0 and hrv[d3] == 52.0
+
+
+def test_replace_mode_preserves_metrics_when_only_workouts_pulled(session, monkeypatch):
+    """The Garmin data-loss case: a replace pull returns workouts (span
+    non-empty) but its per-day metric calls were rate-limited to nothing. The
+    metrics kind came back empty, so existing steps/body-battery are preserved
+    rather than deleted and left un-rewritten."""
+    from datetime import date as _d
+
+    from healthos.models import DailyMetric, Workout
+    from healthos.sync.persistence import WorkoutRecord
     from healthos.sync import runner
 
     d = _d(2026, 6, 8)
-    # Pre-existing bad Eight Sleep night already in the DB.
-    session.add(SleepSession(date=d, source="eight_sleep", total_minutes=300,
-                             is_canonical=False))
-    session.add(DailyMetric(date=d, metric="hrv_rmssd", value=99, unit="ms",
-                            source="eight_sleep", is_canonical=False))
+    session.add(DailyMetric(date=d, metric="steps", value=9000, unit="steps",
+                            source="garmin", is_canonical=False))
     session.commit()
 
-    # Provider now returns NOTHING for the window (user deleted the session).
-    monkeypatch.setitem(runner.SOURCES, "eight_sleep", (lambda s, e: {}, "eight_sleep"))
-    runner.sync_source("eight_sleep", d, d, sync_type="manual", replace=True)
+    def workouts_only(s, e):
+        return {"metrics": [], "sleeps": [],
+                "workouts": [WorkoutRecord(date=d, source="garmin", external_id="a1",
+                                           sport_type="running", duration_minutes=40)]}
+
+    monkeypatch.setitem(runner.SOURCES, "garmin", (workouts_only, "garmin"))
+    runner.sync_source("garmin", d, d, sync_type="manual", replace=True)
 
     from sqlalchemy import select
-    left_metrics = session.scalars(
-        select(DailyMetric).where(DailyMetric.source == "eight_sleep", DailyMetric.date == d)
+    steps = session.scalars(
+        select(DailyMetric).where(DailyMetric.source == "garmin", DailyMetric.metric == "steps")
     ).all()
-    left_sleeps = session.scalars(
-        select(SleepSession).where(SleepSession.source == "eight_sleep", SleepSession.date == d)
-    ).all()
-    assert left_metrics == [] and left_sleeps == []  # stale night gone
+    assert len(steps) == 1 and float(steps[0].value) == 9000  # steps survived
+    assert session.scalars(select(Workout).where(Workout.source == "garmin")).all()
+
+
+def test_garmin_pull_raises_when_throttled_to_empty(monkeypatch):
+    """A pull where every call errored (non-404) and nothing came back must
+    raise, so the sync logs an error instead of a silent 'success, 0 records'."""
+    import healthos.sync.garmin as garmin
+
+    class _ThrottledClient:
+        def __init__(self):
+            self.api_errors = ["/x: 429 Too Many Requests"]
+        def daily_summary(self, d): return None
+        def hrv(self, d): return None
+        def training_status(self, d): return None
+        def vo2max_range(self, s, e): return []
+        def activities(self, s, e): return []
+
+    import pytest
+    with pytest.raises(RuntimeError, match="Garmin returned no data"):
+        garmin.pull(date(2026, 6, 1), date(2026, 6, 1), client=_ThrottledClient())
 
 
 def test_replace_mode_leaves_other_sources_untouched(session, monkeypatch):

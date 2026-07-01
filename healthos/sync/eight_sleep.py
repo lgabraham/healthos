@@ -193,10 +193,20 @@ def _series_values(timeseries: dict, key: str) -> list[float]:
     return out
 
 
-def normalize(sessions: list[dict]) -> tuple[list[SleepRecord], list[MetricPoint]]:
-    sleeps: list[SleepRecord] = []
-    points: list[MetricPoint] = []
-    today = datetime.now(settings.tz).date()
+def _total_sleep_minutes(interval: dict) -> int:
+    return _stage_durations(interval.get("stages") or []).get("total") or 0
+
+
+def _primary_by_date(sessions: list[dict], today: _date) -> dict[_date, dict]:
+    """Pick one session per local date — the night, not a nap.
+
+    Eight Sleep's /intervals returns whatever recent sessions exist, which can
+    include daytime naps or fragmented pieces of one night. They all date to the
+    same morning, so a blind last-write-wins upsert lets a 40-minute nap clobber
+    the night's canonical sleep-duration and staging. Keep only the
+    longest-sleep interval per date so the real night always wins.
+    """
+    primary: dict[_date, dict] = {}
     for interval in sessions:
         d = _local_date(interval)
         if d is None:
@@ -209,6 +219,17 @@ def normalize(sessions: list[dict]) -> tuple[list[SleepRecord], list[MetricPoint
         # finalized, or once it's simply no longer "today".
         if d == today and not interval.get("score"):
             continue
+        cur = primary.get(d)
+        if cur is None or _total_sleep_minutes(interval) > _total_sleep_minutes(cur):
+            primary[d] = interval
+    return primary
+
+
+def normalize(sessions: list[dict]) -> tuple[list[SleepRecord], list[MetricPoint]]:
+    sleeps: list[SleepRecord] = []
+    points: list[MetricPoint] = []
+    today = datetime.now(settings.tz).date()
+    for d, interval in _primary_by_date(sessions, today).items():
         stages = interval.get("stages") or []
         durations = _stage_durations(stages)
         ts = interval.get("timeseries") or {}

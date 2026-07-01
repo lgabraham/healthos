@@ -105,6 +105,7 @@ def correlate_event_to_metric_delta(
                 DailyEvent.event_type == event_type,
                 DailyEvent.date >= start,
                 DailyEvent.date <= end,
+                DailyEvent.confidence.is_distinct_from("dismissed"),
             )
         ).all()
     )

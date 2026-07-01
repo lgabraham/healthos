@@ -38,6 +38,11 @@ class GarminClient:
 
         self._garth = garth
         self._authenticated = False
+        # Non-404 API failures seen this session. Garmin rate-limits aggressively
+        # and garth surfaces that as an exception per call; we record them so the
+        # pull can report an honest error/partial status instead of a silent
+        # "success, 0 records" when the account is throttled or locked.
+        self.api_errors: list[str] = []
 
     def login(self) -> None:
         if self._authenticated:
@@ -70,6 +75,7 @@ class GarminClient:
                 log.debug("Garmin 404 for %s", path)
             else:
                 log.warning("Garmin call failed for %s: %s", path, exc)
+                self.api_errors.append(f"{path}: {exc}")
             return None
 
     # -- endpoints ---------------------------------------------------------
@@ -269,4 +275,19 @@ def pull(start_date: _date, end_date: _date, client: GarminClient | None = None)
     metrics += normalize_vo2max_range(client.vo2max_range(start_date, end_date))
     workouts, workout_points = normalize_activities(client.activities(start_date, end_date))
     metrics += workout_points
+
+    # Don't report "success, 0 records" when the account was actually throttled.
+    # If real API errors occurred and nothing came back, raise so the sync logs
+    # an error (and replace mode, seeing no records, deletes nothing). If some
+    # data did come through despite errors, keep it but log the gap loudly.
+    if client.api_errors:
+        if not metrics and not workouts:
+            raise RuntimeError(
+                f"Garmin returned no data with {len(client.api_errors)} API error(s); "
+                f"first: {client.api_errors[0]}"
+            )
+        log.warning(
+            "Garmin pull is PARTIAL: %d API error(s) during %s..%s; some days may be missing",
+            len(client.api_errors), start_date, end_date,
+        )
     return {"metrics": metrics, "sleeps": [], "workouts": workouts}

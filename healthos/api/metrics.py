@@ -135,7 +135,12 @@ def daily(
 
     sleep = best_available_sleep(db, day)
     last_wk = latest_workout(db, day)
-    events = db.scalars(select(DailyEvent).where(DailyEvent.date == day)).all()
+    events = db.scalars(
+        select(DailyEvent).where(
+            DailyEvent.date == day,
+            DailyEvent.confidence.is_distinct_from("dismissed"),  # hide tombstones
+        )
+    ).all()
 
     # The "why" layer: events today + the night before (which shaped last sleep).
     cal = db.scalars(
@@ -198,7 +203,10 @@ def trend(
     ]
     enriched = rolling_average(padded, rolling)
     event_rows = db.scalars(
-        select(DailyEvent).where(DailyEvent.date >= _date.today() - timedelta(days=days))
+        select(DailyEvent).where(
+            DailyEvent.date >= _date.today() - timedelta(days=days),
+            DailyEvent.confidence.is_distinct_from("dismissed"),
+        )
     ).all()
     return {
         "metric": metric,
@@ -311,7 +319,10 @@ def events(
 ) -> list[dict]:
     stmt = (
         select(DailyEvent)
-        .where(DailyEvent.date >= _date.today() - timedelta(days=days))
+        .where(
+            DailyEvent.date >= _date.today() - timedelta(days=days),
+            DailyEvent.confidence.is_distinct_from("dismissed"),
+        )
         .order_by(DailyEvent.date.desc())
     )
     if event_type:

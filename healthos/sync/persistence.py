@@ -146,7 +146,17 @@ def upsert_sleep(session: Session, records: list[SleepRecord]) -> int:
     There is no DB-level unique constraint on sleep_sessions (a night can in
     theory have naps), so we dedupe in application code on (date, source) to
     keep nightly re-syncs idempotent.
+
+    We collapse duplicate (date, source) records *within this batch* first: the
+    session runs with autoflush disabled, so a second record's existence check
+    can't see a first one added earlier in the same call and would insert a
+    duplicate row that later syncs can never converge. Last record wins.
     """
+    deduped: dict[tuple[_date, str], SleepRecord] = {}
+    for r in records:
+        deduped[(r.date, r.source)] = r
+    records = list(deduped.values())
+
     written = 0
     for r in records:
         existing = session.scalars(
@@ -287,6 +297,9 @@ def upsert_events(session: Session, records: list[EventRecord]) -> int:
                 DailyEvent.date == r.date, DailyEvent.event_type == r.event_type
             )
         ).first()
+        if existing is not None and existing.confidence == "dismissed":
+            # User dismissed this event; don't let a device re-pull resurrect it.
+            continue
         if existing is None:
             session.add(
                 DailyEvent(

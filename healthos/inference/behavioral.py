@@ -23,7 +23,6 @@ from ..config import settings
 from ..models import CalendarEvent, DailyEvent, Workout
 from ..queries import (
     MIN_INFERENCE_DAYS,
-    canonical_sleep,
     canonical_value,
     data_day_count,
     rolling_baseline,
@@ -79,17 +78,27 @@ def detect_alcohol(session: Session, day: _date) -> InferredEvent | None:
         return None
     hrv = canonical_value(session, day, "hrv_rmssd")
     rhr = canonical_value(session, day, "resting_hr")
-    latency = _sleep_latency_minutes(session, day)
-
     hrv_base = rolling_baseline(session, "hrv_rmssd", day)
     rhr_base = rolling_baseline(session, "resting_hr", day)
-    latency_base = _latency_baseline(session, day)
 
-    if None in (hrv, rhr, latency, hrv_base.mean, rhr_base.mean, latency_base):
+    # HRV + RHR (and their baselines) are the load-bearing signals; without them
+    # we can't judge the night at all. Latency is a supporting signal — it may be
+    # absent (Eight Sleep doesn't always expose it), so a missing latency just
+    # leaves that condition unmet rather than aborting the whole rule. That's
+    # what makes the calendar-corroborated 2-of-3 path reachable.
+    if None in (hrv, rhr, hrv_base.mean, rhr_base.mean):
         return None
 
+    latency = _sleep_latency_minutes(session, day)
+    latency_base = _latency_baseline(session, day)
+    latency_high = (
+        latency is not None
+        and latency_base is not None
+        and latency > 1.5 * latency_base
+    )
+
     conditions = (
-        latency > 1.5 * latency_base,
+        latency_high,
         rhr > 1.1 * rhr_base.mean,
         hrv < 0.85 * hrv_base.mean,
     )
@@ -102,9 +111,10 @@ def detect_alcohol(session: Session, day: _date) -> InferredEvent | None:
 
     notes = (
         f"HRV {hrv:.0f} vs base {hrv_base.mean:.0f}; "
-        f"RHR {rhr:.0f} vs {rhr_base.mean:.0f}; "
-        f"latency {latency:.0f}m vs {latency_base:.0f}m"
+        f"RHR {rhr:.0f} vs {rhr_base.mean:.0f}"
     )
+    if latency is not None and latency_base is not None:
+        notes += f"; latency {latency:.0f}m vs {latency_base:.0f}m"
     # Note the keyword/flag only — never the raw event title (MCP reads notes).
     if corroborated:
         notes += "; corroborated by an evening calendar event (alcohol)"
@@ -237,10 +247,14 @@ def detect_high_stress(session: Session, day: _date) -> InferredEvent | None:
 
 
 # -- orchestration ----------------------------------------------------------
+# detect_sick runs before detect_alcohol so a same-day sick event is already
+# written when detect_alcohol checks _recent_sick — otherwise illness (which
+# satisfies the alcohol conditions: high RHR, low HRV, long latency) would fire
+# a spurious alcohol_detected on the first day sickness becomes detectable.
 RULES = [
+    detect_sick,
     detect_alcohol,
     detect_late_workout,
-    detect_sick,
     detect_sauna,
     detect_high_stress,
     detect_calendar_heavy,
@@ -293,13 +307,67 @@ def _evening_alcohol_event(session: Session, day: _date) -> CalendarEvent | None
 
 
 def _sleep_latency_minutes(session: Session, day: _date) -> float | None:
-    sleep = canonical_sleep(session, day)
-    if sleep is None or not sleep.raw_json:
+    """Minutes to fall asleep for the night, from whichever source exposes it.
+
+    We scan every sleep session for the day rather than only the canonical one:
+    the canonical source is now Eight Sleep (whose ``raw_json['score']`` is a
+    bare number, so the old Whoop-shaped ``score['stage_summary']`` parse crashed
+    with AttributeError and silently killed the alcohol rule). Whoop's explicit
+    ``sleep_latency_milli`` is the most accurate reading, so prefer it; otherwise
+    derive latency from the leading awake stage(s) of an Eight Sleep session.
+    """
+    from ..models import SleepSession
+
+    sessions = session.scalars(
+        select(SleepSession).where(SleepSession.date == day)
+    ).all()
+    fallback: float | None = None
+    for s in sessions:
+        lat = _latency_from_raw(s.raw_json)
+        if lat is None:
+            continue
+        if s.source == "whoop":  # explicit provider measure wins
+            return lat
+        if fallback is None:
+            fallback = lat
+    return fallback
+
+
+def _latency_from_raw(raw) -> float | None:
+    """Extract sleep latency (minutes) from a session payload, tolerating the
+    differing shapes across providers without ever assuming a nested dict."""
+    if not isinstance(raw, dict):
         return None
-    score = sleep.raw_json.get("score") or {}
-    stage = score.get("stage_summary") or {}
-    latency_ms = stage.get("sleep_latency_milli") or score.get("sleep_latency_milli")
-    return latency_ms / 60000 if latency_ms else None
+    # Whoop v2: score.stage_summary.sleep_latency_milli (score is a dict).
+    score = raw.get("score")
+    if isinstance(score, dict):
+        stage = score.get("stage_summary")
+        if isinstance(stage, dict) and stage.get("sleep_latency_milli"):
+            return stage["sleep_latency_milli"] / 60000
+        if score.get("sleep_latency_milli"):
+            return score["sleep_latency_milli"] / 60000
+    # Flat explicit fields some payloads carry (value, divisor-to-minutes).
+    for key, per_minute in (("sleep_latency_milli", 60000), ("latency_seconds", 60),
+                            ("latency", 60), ("latencyMinutes", 1)):
+        v = raw.get(key)
+        if isinstance(v, (int, float)) and v > 0:
+            return v / per_minute
+    # Eight Sleep: time asleep onset = leading awake/out stage(s) before the
+    # first real sleep stage.
+    stages = raw.get("stages")
+    if isinstance(stages, list):
+        seconds = 0
+        for st in stages:
+            if not isinstance(st, dict):
+                break
+            name = (st.get("stage") or "").lower()
+            if name in ("awake", "out"):
+                seconds += st.get("duration") or 0
+            else:
+                break
+        if seconds > 0:
+            return seconds / 60
+    return None
 
 
 def _latency_baseline(session: Session, day: _date, window: int = 30) -> float | None:

@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import select
 
 from healthos.inference.behavioral import run_inference_for_date
-from healthos.models import DailyEvent, Workout
+from healthos.models import DailyEvent, SleepSession, Workout
 from healthos.sync.persistence import MetricPoint, upsert_metrics
 
 
@@ -110,3 +110,77 @@ def test_late_workout_any_source(session):
     ev = detect_late_workout(session, d)
     assert ev is not None
     assert ev.source == "inferred_whoop"
+
+
+def _es_night(d: date, latency_min: float, score: float = 90) -> SleepSession:
+    """A production-shaped canonical Eight Sleep night: ``score`` is a bare
+    number (not Whoop's nested dict), and latency is encoded as a leading awake
+    stage — the exact shape that used to crash the latency parser."""
+    return SleepSession(
+        date=d,
+        source="eight_sleep",
+        is_canonical=True,
+        sleep_score=score,
+        raw_json={
+            "ts": f"{d - timedelta(days=1)}T22:30:00Z",
+            "score": score,
+            "stages": [
+                {"stage": "awake", "duration": int(latency_min * 60)},
+                {"stage": "light", "duration": 3600},
+                {"stage": "deep", "duration": 2400},
+            ],
+        },
+    )
+
+
+def test_alcohol_fires_on_eight_sleep_shaped_data(session):
+    """Regression: with Eight Sleep canonical, the alcohol rule must parse
+    latency from the pod's payload and fire on 3/3 — not crash on a numeric
+    ``score`` (which silently killed the rule in production)."""
+    from healthos.inference.behavioral import detect_alcohol
+
+    start = date(2026, 1, 1)
+    _seed_baseline(session, start, n=30, hrv=60, rhr=50)
+    # Normal ~10-min latency across the baseline window.
+    for i in range(30):
+        session.add(_es_night(start + timedelta(days=i), latency_min=10))
+    session.commit()
+
+    target = start + timedelta(days=30)
+    upsert_metrics(
+        session,
+        [
+            MetricPoint(target, "hrv_rmssd", 45.0, "ms", "eight_sleep"),  # < 0.85*60
+            MetricPoint(target, "resting_hr", 60.0, "bpm", "eight_sleep"),  # > 1.1*50
+        ],
+    )
+    session.add(_es_night(target, latency_min=25))  # > 1.5 * 10-min baseline
+    session.commit()
+
+    ev = detect_alcohol(session, target)
+    assert ev is not None
+    assert ev.event_type == "alcohol_detected"
+    assert "latency 25m" in ev.notes
+
+
+def test_alcohol_tolerates_missing_latency(session):
+    """A canonical night with no derivable latency must not crash the rule; the
+    latency condition is simply unmet (and 2/3 alone doesn't fire)."""
+    from healthos.inference.behavioral import detect_alcohol
+
+    start = date(2026, 1, 1)
+    _seed_baseline(session, start, n=30, hrv=60, rhr=50)
+    session.commit()
+    target = start + timedelta(days=30)
+    upsert_metrics(
+        session,
+        [
+            MetricPoint(target, "hrv_rmssd", 45.0, "ms", "eight_sleep"),
+            MetricPoint(target, "resting_hr", 60.0, "bpm", "eight_sleep"),
+        ],
+    )
+    # Canonical night present but no stages/latency info.
+    session.add(SleepSession(date=target, source="eight_sleep", is_canonical=True,
+                             raw_json={"score": 88}))
+    session.commit()
+    assert detect_alcohol(session, target) is None  # 2/3, no corroboration

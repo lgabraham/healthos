@@ -114,7 +114,14 @@ def delete_event(
     date: str = Query(..., description="YYYY-MM-DD"),
     db: Session = Depends(db_session),
 ) -> dict:
-    """Dismiss/remove an event (e.g. a false-positive inference)."""
+    """Dismiss/remove an event (e.g. a false-positive inference).
+
+    A manually-logged event is truly deleted — it's the user's own entry and
+    inference never recreates it. Anything else (an inferred guess, or a
+    device-confirmed event) is instead *tombstoned* as ``confidence='dismissed'``
+    rather than deleted: inference and device upserts skip dismissed rows, so the
+    same conditions on the next sync/reinfer don't resurrect the false positive.
+    """
     day = _date.fromisoformat(date)
     event = db.scalars(
         select(DailyEvent).where(
@@ -123,6 +130,13 @@ def delete_event(
     ).first()
     if event is None:
         raise HTTPException(status_code=404, detail="No such event.")
-    db.delete(event)
+    if event.confidence == "manual":
+        db.delete(event)
+        outcome = "deleted"
+    else:
+        event.confidence = "dismissed"
+        event.value = None
+        event.notes = "dismissed by user"
+        outcome = "dismissed"
     db.commit()
-    return {"ok": True, "deleted": {"date": date, "event_type": event_type}}
+    return {"ok": True, outcome: {"date": date, "event_type": event_type}}

@@ -123,6 +123,7 @@ def sick_dates(session: Session, end: _date, window_days: int = BASELINE_WINDOW_
             DailyEvent.event_type == "sick",
             DailyEvent.date >= start,
             DailyEvent.date <= end,
+            DailyEvent.confidence.is_distinct_from("dismissed"),
         )
     ).all()
     return set(rows)
@@ -281,7 +282,10 @@ def attribution(session: Session, day: _date) -> dict:
             reason = "Baselines aren't established yet — they need ~2 weeks of canonical data."
 
     events = session.scalars(
-        select(DailyEvent).where(DailyEvent.date.in_([day, day - timedelta(days=1)]))
+        select(DailyEvent).where(
+            DailyEvent.date.in_([day, day - timedelta(days=1)]),
+            DailyEvent.confidence.is_distinct_from("dismissed"),
+        )
     ).all()
     event_notes = [
         f"{e.event_type.replace('_', ' ')} ({'yesterday' if e.date != day else 'today'})"
