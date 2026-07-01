@@ -19,7 +19,7 @@ def session():
     s.execute(
         text(
             "TRUNCATE daily_metrics, sleep_sessions, workouts, daily_events, "
-            "calendar_events, sync_log RESTART IDENTITY CASCADE"
+            "calendar_events, sync_log, intake_log, oauth_tokens RESTART IDENTITY CASCADE"
         )
     )
     s.commit()

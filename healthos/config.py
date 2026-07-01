@@ -80,6 +80,14 @@ class Settings(BaseSettings):
         alias="HARVIA_STATE_FILE",
     )
 
+    # Auth -----------------------------------------------------------------
+    # Single shared secret gating the whole API + dashboard. When set, the
+    # dashboard requires a one-time password login (cookie session) and the
+    # API/webhooks accept the same value as a Bearer token / X-API-Key / ?token.
+    # When UNSET, auth is disabled (frictionless local dev) and the app logs a
+    # loud startup warning — so a public deploy is never silently unprotected.
+    auth_token: str | None = Field(default=None, alias="HEALTHOS_AUTH_TOKEN")
+
     # App ------------------------------------------------------------------
     timezone: str = Field(default="America/Los_Angeles", alias="TIMEZONE")
     sync_hour: int = Field(default=7, alias="SYNC_HOUR")

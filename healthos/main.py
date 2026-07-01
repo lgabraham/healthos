@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 
 from . import __version__
 from .api import admin, auth, events, journal, metrics, webhooks
+from .auth import AuthMiddleware, router as auth_gate_router
 from .config import settings
 from .sync.scheduler import shutdown_scheduler, start_scheduler
 
@@ -27,6 +28,13 @@ async def lifespan(app: FastAPI):
         start_scheduler()
     else:
         log.info("In-process scheduler disabled (ENABLE_SCHEDULER=false); expecting external cron.")
+    if not settings.auth_token:
+        log.warning(
+            "HEALTHOS_AUTH_TOKEN is not set — the API and dashboard are UNPROTECTED. "
+            "This is fine for local dev, but set it before exposing HealthOS publicly."
+        )
+    else:
+        log.info("Auth enabled (HEALTHOS_AUTH_TOKEN set).")
     log.info("HealthOS %s started", __version__)
     try:
         yield
@@ -37,6 +45,10 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="HealthOS", version=__version__, lifespan=lifespan)
 
+# Auth gate wraps everything (added before CORS so it runs *after* CORS in the
+# middleware stack — preflight OPTIONS still get their CORS headers, and the gate
+# also covers the static SPA mount below).
+app.add_middleware(AuthMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -44,6 +56,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_gate_router)  # /login, /logout
 app.include_router(metrics.router)
 app.include_router(webhooks.router)
 app.include_router(auth.router)
