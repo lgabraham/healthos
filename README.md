@@ -255,14 +255,37 @@ Add to Claude Desktop using `claude_desktop_config.example.json` (copy into your
 `claude_desktop_config.json`, set `cwd` and `DATABASE_URL`). Then ask things
 like *"How did my HRV change the week after heavy training blocks?"*
 
+## Blood panels (labs)
+
+Import blood-panel results and see every biomarker's history, latest value, and
+whether it's inside your optimal range — on the **Labs** tab (grouped by system,
+with a sparkline per marker and an "out of optimal range" summary up top).
+
+```bash
+# Paste/export a panel to a text file in the longitudinal format:
+#   Values listed chronologically: [2023-03-16 | 2024-06-03 | 2025-09-23]
+#   METABOLIC
+#   Glucose (mg/dL): [100 | 97 | 97]  (70-90)
+#   ApoB (mg/dL): [58 | 66 | 63]  (<60)
+healthos labs-import panel.txt --source instalab
+```
+
+Values are stored in `lab_results` (parsed number + raw text, so qualifiers like
+`<6` and non-numeric results survive) with the lab's own optimal range, so
+out-of-range flagging needs no hardcoded reference intervals. Re-importing an
+updated panel upserts in place. The importer parses text you provide; it doesn't
+reach into any portal, so nothing sensitive is fetched automatically.
+
 ## Dashboard
 
 Tabs — **Pulse** (headliners + full daily breakdown: recovery, HRV vs baseline,
 sleep segments, events, last workout), **Streak** (sleep & activity streaks),
 **Trends** (30/60/90-day/1y toggle with 7-day rolling averages and event
-markers), **Links** (correlations: scatter + r + sample size + plain-language
-read), **Workouts**, and **Journal**. Dark `#0a0a0a`, amber `#f59e0b` accent,
-IBM Plex Mono for values.
+markers), **Signals** (HRV/RHR with calendar-event overlay), **Links**
+(correlations: scatter + r + sample size + plain-language read), **Labs** (blood
+panels over time — see below), **Workouts**, **Journal**, and **Data** (device
+provenance, coverage grid, source concordance). Dark `#0a0a0a`, amber `#f59e0b`
+accent, IBM Plex Mono for values.
 
 Build for production with `pnpm build` (outputs `frontend/dist/`). Two options:
 deploy the bundle to Vercel and point it at the API via `VITE_API_BASE`, **or**

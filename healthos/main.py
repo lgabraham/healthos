@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .api import admin, auth, events, journal, metrics, webhooks
+from .api import admin, auth, events, journal, labs, metrics, webhooks
 from .auth import AuthMiddleware, router as auth_gate_router
 from .config import settings
 from .sync.scheduler import shutdown_scheduler, start_scheduler
@@ -63,6 +63,7 @@ app.include_router(auth.router)
 app.include_router(admin.router)
 app.include_router(events.router)
 app.include_router(journal.router)
+app.include_router(labs.router)
 
 
 @app.get("/health")

@@ -20,6 +20,7 @@ export const api = {
   events: (days, type) =>
     get(`/api/events?days=${days}${type ? `&event_type=${type}` : ""}`),
   correlations: (days) => get(`/api/correlations?days=${days}`),
+  labs: () => get("/api/labs"),
   coverage: (days) => get(`/api/coverage?days=${days}`),
   calendar: (days) => get(`/api/calendar?days=${days}`),
   attribution: (date) => get(`/api/attribution${date ? `?date=${date}` : ""}`),

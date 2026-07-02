@@ -273,6 +273,28 @@ def _cmd_whoop_raw(args: argparse.Namespace) -> None:
         client.close()
 
 
+def _cmd_labs_import(args: argparse.Namespace) -> None:
+    """Parse a blood-panel text export and upsert it into lab_results."""
+    from pathlib import Path
+
+    from .database import get_session
+    from .labs import import_lab_rows, parse_instalab_longitudinal
+
+    text = Path(args.file).read_text(encoding="utf-8")
+    if args.format == "instalab-longitudinal":
+        rows = parse_instalab_longitudinal(text)
+    else:  # pragma: no cover - only one format so far
+        raise SystemExit(f"Unknown --format {args.format!r}")
+    if not rows:
+        raise SystemExit("No lab rows parsed — check the file format.")
+    with get_session() as session:
+        n = import_lab_rows(session, rows, source=args.source)
+    dates = sorted({r.date for r in rows})
+    markers = sorted({r.marker for r in rows})
+    print(f"Imported {n} lab values: {len(markers)} markers across "
+          f"{len(dates)} draws ({dates[0]}..{dates[-1]}), source={args.source}.")
+
+
 def _cmd_summary(args: argparse.Namespace) -> None:
     from .database import get_session
     from .queries import canonical_value, rolling_baseline
@@ -339,6 +361,13 @@ def build_parser() -> argparse.ArgumentParser:
         "harvia-monitor", help="poll the sauna live and record confirmed sessions"
     )
     hm.set_defaults(func=_cmd_harvia_monitor)
+
+    li = sub.add_parser("labs-import", help="import a blood-panel text export into lab_results")
+    li.add_argument("file", help="path to the exported panel text")
+    li.add_argument("--source", default="instalab")
+    li.add_argument("--format", default="instalab-longitudinal",
+                    choices=["instalab-longitudinal"])
+    li.set_defaults(func=_cmd_labs_import)
 
     su = sub.add_parser("summary")
     su.add_argument("--date", default=None)

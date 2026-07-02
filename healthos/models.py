@@ -166,6 +166,37 @@ class OAuthToken(Base):
     )
 
 
+class LabResult(Base):
+    """A single biomarker reading from a blood panel / lab draw.
+
+    Labs are sparse (a handful of draws a year) and heterogeneous, so unlike
+    daily_metrics this table keeps both a parsed numeric value and the raw text
+    (to preserve qualifiers like "<6", ">60", or non-numeric results like an
+    APOE genotype), plus the lab's own optimal range so the UI can flag
+    out-of-range values without hardcoding reference intervals.
+    """
+
+    __tablename__ = "lab_results"
+    # One row per (draw date, marker, source); re-importing a panel updates.
+    __table_args__ = (
+        UniqueConstraint("date", "marker", "source", name="uq_lab_date_marker_source"),
+    )
+
+    id: Mapped[uuid.UUID] = _uuid_col()
+    date: Mapped[_date] = mapped_column(Date, nullable=False, index=True)
+    marker: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    category: Mapped[str | None] = mapped_column(String(50))  # metabolic, lipids, …
+    value_num: Mapped[float | None] = mapped_column(Numeric)  # parsed number, if any
+    value_text: Mapped[str] = mapped_column(String(100), nullable=False)  # raw, e.g. "<6"
+    qualifier: Mapped[str | None] = mapped_column(String(4))  # "<" | ">" | None
+    unit: Mapped[str | None] = mapped_column(String(50))
+    optimal_low: Mapped[float | None] = mapped_column(Numeric)
+    optimal_high: Mapped[float | None] = mapped_column(Numeric)
+    optimal_text: Mapped[str | None] = mapped_column(String(50))  # raw range, e.g. "<1"
+    source: Mapped[str] = mapped_column(String(50), nullable=False, server_default="lab")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class IntakeLog(Base):
     """A free-text food / medication / supplement journal entry, tagged for
     behavioral correlation (NSAID / alcohol / dairy … vs next-day biomarkers).

@@ -9,6 +9,7 @@ import JournalView from "./views/JournalView.jsx";
 import CorrelationsView from "./views/CorrelationsView.jsx";
 import SignalsView from "./views/SignalsView.jsx";
 import CoverageView from "./views/CoverageView.jsx";
+import LabsView from "./views/LabsView.jsx";
 
 const VIEWS = {
   pulse: { label: "Pulse", component: DailyView },
@@ -16,6 +17,7 @@ const VIEWS = {
   trends: { label: "Trends", component: TrendsView },
   signals: { label: "Signals", component: SignalsView },
   links: { label: "Links", component: CorrelationsView },
+  labs: { label: "Labs", component: LabsView },
   workouts: { label: "Workouts", component: WorkoutsView },
   journal: { label: "Journal", component: JournalView },
   data: { label: "Data", component: CoverageView },
